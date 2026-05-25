@@ -1,0 +1,9 @@
+flask==3.0.3
+apscheduler==3.10.4
+werkzeug==3.0.3
+python-dotenv==1.0.1
+gunicorn==22.0.0
+cryptography==42.0.8
+python-whois==0.9.5
+requests==2.32.3
+psycopg2-binary==2.9.9

@@ -1,0 +1,27 @@
+[Unit]
+Description=Vigil SSL & Domain Expiry Monitor
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/ssl_checker
+EnvironmentFile=/opt/ssl_checker/.env
+ExecStart=/opt/ssl_checker/venv/bin/gunicorn \
+    --workers 1 --threads 4 \
+    --bind 127.0.0.1:5000 \
+    --timeout 120 \
+    --access-logfile /opt/ssl_checker/data_volume/access.log \
+    --error-logfile /opt/ssl_checker/data_volume/error.log \
+    --chdir /opt/ssl_checker/ssl_domain_checker \
+    app:app
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillMode=mixed
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

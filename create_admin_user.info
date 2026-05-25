@@ -1,0 +1,151 @@
+# Vigil — Admin User Creation & Management
+
+## First-Run Auto-Creation
+
+On the very first startup (when the `users` table is empty), Vigil automatically:
+
+1. Creates an `admin` user with username **admin**.
+2. Password determined by (in priority order):
+   - `ADMIN_PASSWORD` env var (recommended for production), OR
+   - **Random 32-character secure password** generated at startup.
+3. If using a generated password, writes it to **`admin_credentials.txt`** next to the database file (`data_volume/admin_credentials.txt`).
+
+### How to Retrieve the First-Run Password
+
+**Pre-set via env var (Docker):**
+```bash
+# In .env or docker-compose.yml, set:
+ADMIN_PASSWORD=YourStrongPassword123
+```
+
+**Docker (auto-generated):**
+```bash
+docker exec vigil cat /app/data_volume/admin_credentials.txt
+```
+
+**Bare-metal (auto-generated):**
+```bash
+cat data_volume/admin_credentials.txt
+```
+
+## Manual Admin User Creation via API
+
+If auto-creation has already run or you need additional admin users:
+
+```bash
+# 1. Log in to get a session cookie
+curl -X POST http://localhost:5000/api/login \
+  -H "Content-Type: application/json" \
+  -c /tmp/cookies.txt \
+  -d '{"username":"admin","password":"<existing-password>"}'
+
+# 2. Get a CSRF token
+CSRF=$(curl -s -b /tmp/cookies.txt http://localhost:5000/api/csrf-token | python3 -c "import sys,json; print(json.load(sys.stdin)['csrf_token'])")
+
+# 3. Create a new admin user
+curl -X POST http://localhost:5000/api/users \
+  -H "Content-Type: application/json" \
+  -H "X-CSRF-Token: $CSRF" \
+  -b /tmp/cookies.txt \
+  -d '{"username":"newadmin","password":"StrongP@ss1","role":"admin"}'
+```
+
+### Using an API Key (no session login needed)
+
+```bash
+# Create an API key via UI (Settings > API Keys), then:
+curl -X POST http://localhost:5000/api/users \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your-api-key>" \
+  -d '{"username":"newadmin","password":"StrongP@ss1","role":"admin"}'
+```
+
+## Changing Your Own Password
+
+```bash
+# Get CSRF token first (see above)
+curl -X PUT http://localhost:5000/api/users/<user_id> \
+  -H "Content-Type: application/json" \
+  -H "X-CSRF-Token: $CSRF" \
+  -b /tmp/cookies.txt \
+  -d '{"password":"NewStrongP@ss1"}'
+```
+
+## Security Settings Affecting Passwords
+
+Configured via Settings > Security in the UI or the `/api/security-settings` API:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `min_password_length` | 8 | Minimum password length |
+| `require_uppercase` | true | Require at least one uppercase letter |
+| `require_lowercase` | true | Require at least one lowercase letter |
+| `require_number` | true | Require at least one digit |
+| `require_special` | false | Require a special character |
+| `max_login_attempts` | 5 | Lockout threshold |
+| `lockout_duration` | 15 | Lockout duration in minutes |
+| `session_timeout` | 60 | Session lifetime in minutes |
+
+## Resetting a Forgotten Admin Password
+
+### SQLite — Docker
+
+```bash
+docker exec -it vigil bash -c "python3 -c '
+from werkzeug.security import generate_password_hash
+import sqlite3
+conn = sqlite3.connect(\"/app/data_volume/ssl_checker.db\")
+conn.execute(\"UPDATE users SET password=? WHERE username=?\", (generate_password_hash(\"NewAdminP@ss1\"), \"admin\"))
+conn.commit()
+conn.close()
+print(\"Password reset for admin\")
+'"
+```
+
+### SQLite — Bare-metal
+
+```bash
+cd /opt/ssl_checker
+source venv/bin/activate
+python3 -c "
+from werkzeug.security import generate_password_hash
+import sqlite3
+conn = sqlite3.connect('data_volume/ssl_checker.db')
+conn.execute('UPDATE users SET password=? WHERE username=?', (generate_password_hash('NewAdminP@ss1'), 'admin'))
+conn.commit()
+conn.close()
+print('Password reset for admin')
+"
+```
+
+### PostgreSQL — One-liner
+
+```bash
+PGPASSWORD='<POSTGRES_PASSWORD>' psql -h <POSTGRES_HOST> -p <POSTGRES_PORT> -U <POSTGRES_USER> -d <POSTGRES_DB> \
+  -c "UPDATE <POSTGRES_SCHEMA>.users SET password='$(python3 -c "
+import secrets
+from werkzeug.security import generate_password_hash
+print(generate_password_hash(secrets.token_urlsafe(16)))
+")' WHERE username='admin';"
+```
+
+### PostgreSQL — Step by Step
+
+```bash
+# 1. Generate a new password and hash
+python3 -c "
+import secrets
+from werkzeug.security import generate_password_hash
+pwd = secrets.token_urlsafe(16)
+print(f'New password: {pwd}')
+print(f'Hash: {generate_password_hash(pwd)}')
+"
+
+# 2. Update the admin user (use the hash from step 1)
+PGPASSWORD='<POSTGRES_PASSWORD>' psql -h <POSTGRES_HOST> -p <POSTGRES_PORT> -U <POSTGRES_USER> -d <POSTGRES_DB> \
+  -c "UPDATE <POSTGRES_SCHEMA>.users SET password='<hash-from-step-1>' WHERE username='admin';"
+
+# 3. Restart the service
+sudo systemctl restart ssl_checker   # bare-metal
+docker restart vigil                 # Docker
+```

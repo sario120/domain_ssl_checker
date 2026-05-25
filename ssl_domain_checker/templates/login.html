@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vigil — Login</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .login-wrapper {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .login-wrapper::before {
+    content: '';
+    position: absolute;
+    inset: -50%;
+    background: radial-gradient(ellipse at 30% 50%, rgba(59,130,246,0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 50%, rgba(59,130,246,0.06) 0%, transparent 50%);
+    animation: bgShift 12s ease-in-out infinite alternate;
+    pointer-events: none;
+  }
+  @keyframes bgShift {
+    0% { transform: translate(0, 0) rotate(0deg); }
+    100% { transform: translate(2%, 1%) rotate(3deg); }
+  }
+  @keyframes loginFadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes loginShake {
+    0%, 100% { transform: translateX(0); }
+    10%, 30%, 50%, 70%, 90% { transform: translateX(-6px); }
+    20%, 40%, 60%, 80% { transform: translateX(6px); }
+  }
+  .login-box { animation: loginFadeIn 0.4s ease-out;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 40px 36px 28px;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    position: relative;
+    z-index: 1;
+  }
+  .login-box.shake { animation: loginShake 0.4s ease-out; }
+  .login-logo { display: block; margin: 0 auto 20px; width: 200px; height: auto; border-radius: 8px; }
+  .login-header { text-align: center; margin-bottom: 24px; }
+  .login-header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--primary);
+    margin-bottom: 4px;
+  }
+  .login-header p {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0;
+  }
+  .login-box .form-row { margin-bottom: 16px; }
+  .login-box .form-row.form-row-inline { display: flex; align-items: center; gap: 10px; }
+  .login-box .form-row.form-row-inline .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); }
+  .login-box .form-actions { margin-top: 20px; }
+  .login-box .btn-primary { width: 100%; padding: 10px; font-size: 15px; }
+  .login-error {
+    background: var(--red-bg);
+    color: var(--red);
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    display: none;
+  }
+  .login-box .form-row input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+  }
+  .login-box .form-row input.error {
+    border-color: var(--red);
+    box-shadow: 0 0 0 3px rgba(239,68,68,0.15);
+  }
+  .login-hint {
+    text-align: center;
+    margin-top: 16px;
+    font-size: 12px;
+    color: var(--text-muted);
+    opacity: 0.6;
+  }
+  .login-footer {
+    text-align: center;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+  .login-box.fade-out { animation: loginFadeOut 0.25s ease-in forwards; }
+  @keyframes loginFadeOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-10px); } }
+  .login-error.locked { display: flex; align-items: center; gap: 8px; }
+  .login-error.locked .lock-icon { font-size: 18px; flex-shrink: 0; }
+  .login-error .attempts-left { display: block; font-size: 11px; opacity: 0.7; margin-top: 2px; }
+  .err-close {
+    position: absolute; top: 6px; right: 8px;
+    background: none; border: none; color: inherit; opacity: 0.5;
+    font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px;
+  }
+  .err-close:hover { opacity: 1; }
+  .login-error { position: relative; }
+  .login-theme-toggle {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 10;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    backdrop-filter: blur(4px);
+  }
+  .login-theme-toggle:hover { background: var(--bg-hover); color: var(--text); }
+</style>
+</head>
+<body>
+<div class="login-wrapper">
+  <button class="login-theme-toggle" id="login-theme-toggle" title="Toggle theme" type="button">🌙</button>
+  <div class="login-box">
+    <img src="/static/logo20.png" alt="Logo" class="login-logo">
+    <div class="login-header">
+      <h1>Vigil</h1>
+      <p>Sign in to your dashboard</p>
+    </div>
+    <div class="login-error" id="login-error"></div>
+    <form id="login-form">
+      <div class="form-row">
+        <label for="username">Username</label>
+        <input type="text" id="username" placeholder="Enter username" required autofocus>
+      </div>
+      <div class="form-row">
+        <label for="password">Password</label>
+        <div class="password-field">
+          <input type="password" id="password" placeholder="Enter password" required>
+          <button type="button" class="toggle-pw" id="toggle-pw" tabindex="-1" aria-label="Toggle password visibility">👁️</button>
+        </div>
+      </div>
+      <div class="form-row form-row-inline">
+        <label class="checkbox-label"><input type="checkbox" id="remember-me"> Remember me</label>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary" id="login-btn">Sign In</button>
+      </div>
+      <div class="login-hint">Press <kbd>Enter</kbd> to sign in · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> also works</div>
+    </form>
+    <div class="login-footer">Vigil SSL Checker · v1.0</div>
+  </div>
+</div>
+<script src="/static/login.js"></script>
+</body>
+</html>

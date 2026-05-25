@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vigil — Dashboard</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <nav class="navbar">
+    <div class="nav-brand" data-action="go-dashboard"><img src="/static/logo20.png" alt="Logo" style="height:28px;vertical-align:middle;margin-right:8px;border-radius:6px;cursor:pointer;">Vigil</div>
+    <div class="nav-tabs">
+      <button class="nav-tab active" data-view="dashboard">Dashboard</button>
+      <button class="nav-tab" data-view="domains">Domains</button>
+      <button class="nav-tab" data-view="sslcerts">SSL Certs</button>
+      <button class="nav-tab" data-view="settings">Settings</button>
+      <button class="nav-tab" data-view="logs">Logs</button>
+    </div>
+    <div class="nav-right">
+      <button class="theme-toggle" data-action="toggle-theme" title="Toggle theme">
+  <svg class="theme-icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="12" cy="12" r="5"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/></g></svg>
+  <svg class="theme-icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
+      <span class="nav-user" id="nav-username"></span>
+      <button class="nav-logout" data-action="logout">Logout</button>
+    </div>
+  </nav>
+
+  <main class="container">
+    <!-- Dashboard View -->
+    <section id="view-dashboard" class="view active">
+      <div class="view-header">
+        <h2>Dashboard <span class="dash-counts" id="dash-counts"></span></h2>
+        <div class="header-actions">
+          <select id="auto-refresh-select" class="auto-refresh-select">
+            <option value="0">No refresh</option>
+            <option value="30">30s</option>
+            <option value="60">60s</option>
+          </select>
+          <button class="btn btn-secondary" data-action="check-all-full">Check All Domains</button>
+          <button class="btn btn-secondary" data-action="check-all-ssl">Check All SSL</button>
+          <button class="btn btn-secondary" data-action="export-csv">Export CSV</button>
+          <button class="btn btn-secondary" id="quick-add-toggle" data-action="toggle-quickadd">+ Quick Add</button>
+        </div>
+      </div>
+
+      <div class="dashboard-hero">
+        <div class="hero-card">
+          <span class="hero-card-label">Next scheduled check</span>
+          <strong class="hero-card-value" id="hero-next-check">Loading…</strong>
+          <div class="hero-card-note" id="hero-scheduler-note">Scheduler status will appear here.</div>
+        </div>
+        <div class="hero-card">
+          <span class="hero-card-label">Open issues</span>
+          <strong class="hero-card-value" id="hero-issue-count">0</strong>
+          <div class="hero-card-note">Combined SSL and domain alerts.</div>
+        </div>
+        <div class="hero-card hero-card-actions">
+          <span class="hero-card-label">Quick actions</span>
+          <div class="hero-card-buttons">
+            <button class="btn btn-secondary btn-sm" data-action="check-all-full">Check All</button>
+            <button class="btn btn-secondary btn-sm" data-action="check-all-ssl">Check SSL</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="scheduler-status" id="scheduler-status">
+        <span class="dot" id="scheduler-dot"></span>
+        <span id="scheduler-text">Loading scheduler status...</span>
+        <span id="last-refreshed" style="margin-left:auto;font-size:11px"></span>
+      </div>
+
+      <div id="dash-changed" class="dash-changed"></div>
+
+      <div class="dash-layout">
+        <div class="dash-main">
+          <div class="dash-health-row">
+            <div class="dash-health">
+              <span class="health-label">Domain Health</span>
+              <span class="health-pct" id="dash-domain-health-pct">—</span>
+              <div class="health-bar-bg"><div class="health-bar" id="dash-domain-health-bar"></div></div>
+            </div>
+            <div class="dash-health">
+              <span class="health-label">SSL Health</span>
+              <span class="health-pct" id="dash-ssl-health-pct">—</span>
+              <div class="health-bar-bg"><div class="health-bar" id="dash-ssl-health-bar"></div></div>
+            </div>
+            <div class="dash-health">
+              <span class="health-label">Reachable</span>
+              <span class="health-pct" id="dash-reachable-pct">—</span>
+              <div class="health-bar-bg"><div class="health-bar" id="dash-reachable-bar"></div></div>
+            </div>
+          </div>
+
+          <div class="dash-grid">
+            <div class="dash-card">
+              <div class="dash-card-header">Domains</div>
+              <div class="dash-card-body">
+                <div class="dash-stat"><span class="dash-num" id="dash-full-total">0</span> total</div>
+                <div class="dash-stat healthy" data-action="filter-domains" data-type="full" data-status="healthy"><span class="dash-num" id="dash-full-healthy">0</span> Healthy</div>
+                <div class="dash-stat warning" data-action="filter-domains" data-type="full" data-status="warning"><span class="dash-num" id="dash-full-warning">0</span> Watch</div>
+                <div class="dash-stat danger" data-action="filter-domains" data-type="full" data-status="expired"><span class="dash-num" id="dash-full-danger">0</span> Expired</div>
+                <div class="dash-stat error" data-action="filter-domains" data-type="full" data-status="error"><span class="dash-num" id="dash-full-error">0</span> Error</div>
+                <div class="dash-stat pending" data-action="filter-domains" data-type="full" data-status="pending"><span class="dash-num" id="dash-full-pending">0</span> Pending</div>
+              </div>
+            </div>
+            <div class="dash-card">
+              <div class="dash-card-header">SSL Certificates</div>
+              <div class="dash-card-body">
+                <div class="dash-stat"><span class="dash-num" id="dash-ssl-total">0</span> total</div>
+                <div class="dash-stat healthy" data-action="filter-domains" data-type="ssl_only" data-status="healthy"><span class="dash-num" id="dash-ssl-healthy">0</span> Healthy</div>
+                <div class="dash-stat warning" data-action="filter-domains" data-type="ssl_only" data-status="watch"><span class="dash-num" id="dash-ssl-warning">0</span> Watch</div>
+                <div class="dash-stat danger" data-action="filter-domains" data-type="ssl_only" data-status="expired"><span class="dash-num" id="dash-ssl-danger">0</span> Expired</div>
+                <div class="dash-stat error" data-action="filter-domains" data-type="ssl_only" data-status="error"><span class="dash-num" id="dash-ssl-error">0</span> Error</div>
+                <div class="dash-stat pending" data-action="filter-domains" data-type="ssl_only" data-status="pending"><span class="dash-num" id="dash-ssl-pending">0</span> Pending</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dash-buckets" id="dash-buckets">
+            <h3 class="collapsible-header" data-collapse="buckets"><span class="collapse-arrow">&#9660;</span> Expiry Summary</h3>
+            <div class="collapsible-body"><div class="buckets-grid" id="expiry-buckets"></div></div>
+          </div>
+        </div>
+
+        <div class="dash-sidebar">
+          <div class="dash-sparkline" id="dash-sparkline">
+            <div class="sparkline-header collapsible-header" data-collapse="sparkline">
+              <span class="collapse-arrow">&#9660;</span>
+              <h4>7-Day Health Trend</h4>
+              <div class="sparkline-legend" id="sparkline-legend"></div>
+            </div>
+            <div class="collapsible-body" style="position:relative"><canvas id="sparkline-canvas" height="140"></canvas><div class="sparkline-tooltip" id="sparkline-tooltip"></div></div>
+          </div>
+
+          <div class="dash-top-expiring" id="dash-ssl-expiring">
+            <h3 class="collapsible-header" data-collapse="ssl-exp"><span class="collapse-arrow">&#9660;</span> SSL Expiring Soon <span class="dash-counts" style="font-weight:400">(≤30d)</span></h3>
+            <div class="collapsible-body"><div class="top-list" id="ssl-expiring-list"></div></div>
+          </div>
+          <div class="dash-top-expiring" id="dash-domain-expiring">
+            <h3 class="collapsible-header" data-collapse="domain-exp"><span class="collapse-arrow">&#9660;</span> Domain Expiring Soon <span class="dash-counts" style="font-weight:400">(≤90d)</span></h3>
+            <div class="collapsible-body"><div class="top-list" id="domain-expiring-list"></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Domains View -->
+    <section id="view-domains" class="view">
+      <div class="view-header">
+        <div>
+          <h2>Domains</h2>
+          <p class="view-subtitle">Monitor domain registration and SSL certificate health together.</p>
+        </div>
+        <div class="header-actions">
+          <input type="text" id="domain-search" class="domain-search-input" placeholder="Search domains, registrar...">
+          <select id="tld-filter" class="tld-filter" title="Filter by TLD">
+            <option value="">All TLDs</option>
+          </select>
+          <button class="btn btn-secondary" data-action="toggle-view-full" title="Switch to table view"><span class="view-toggle-icon">&#9776;</span><span class="view-toggle-label">Table</span></button>
+          <button class="btn btn-secondary" data-action="export">Export</button>
+          <button class="btn btn-secondary" data-action="import">Import</button>
+          <button class="btn btn-secondary" data-action="check-all-full" id="btn-check-all-full">Check All</button>
+          <button class="btn btn-primary" data-action="add-domain-full">+ Add Domain</button>
+        </div>
+      </div>
+      <div class="domain-list-summary" id="domain-summary-full">
+        <span id="domain-result-full">Showing 0 domains</span>
+        <button class="btn btn-sm btn-secondary" data-action="clear-domain-filters" data-type="full" style="display:none">Clear filters</button>
+      </div>
+
+      <div class="domain-filters" id="domain-filters">
+        <button class="log-filter active" data-domain-filter="all">All</button>
+        <button class="log-filter" data-domain-filter="healthy">Healthy</button>
+        <button class="log-filter" data-domain-filter="warning">Watch</button>
+        <button class="log-filter" data-domain-filter="expired">Expired</button>
+        <button class="log-filter" data-domain-filter="error">Error</button>
+      </div>
+
+      <div class="bulk-toolbar" id="bulk-toolbar" style="display:none">
+        <label class="bulk-select-all"><input type="checkbox" id="select-all-full"> Select All</label>
+        <span id="bulk-count">0 selected</span>
+        <button class="btn btn-sm btn-secondary" data-action="bulk-check">Check Selected</button>
+        <button class="btn btn-sm btn-danger" data-action="bulk-delete">Delete Selected</button>
+        <button class="btn btn-sm btn-secondary" data-action="bulk-export">Export Selected</button>
+        <button class="btn btn-sm btn-secondary" data-action="bulk-notes">Add Notes</button>
+        <button class="btn btn-sm btn-secondary" data-action="bulk-tags">Manage Tags</button>
+        <button class="btn btn-sm btn-secondary" data-action="bulk-compare">Compare</button>
+        <button class="btn btn-sm btn-secondary" data-action="print-view">Print</button>
+        <button class="btn btn-sm btn-secondary" data-action="bulk-deselect">Clear</button>
+      </div>
+
+      <div class="sort-bar" id="sort-bar-full">
+        <button class="sort-btn active" data-sort="url" data-type="full">Name <span class="sort-arrow">&#9650;</span></button>
+        <button class="sort-btn" data-sort="status" data-type="full">Status</button>
+        <button class="sort-btn" data-sort="days" data-type="full">Days Left</button>
+        <button class="sort-btn" data-sort="checked" data-type="full">Last Checked</button>
+        <div class="sort-right">
+          <label class="sort-toggle"><input type="checkbox" id="group-by-status"> Group by status</label>
+          <div class="column-toggle" id="col-toggle-full">
+            <button class="btn btn-sm btn-secondary" data-action="toggle-columns-full">&#9776; Columns</button>
+            <div class="column-dropdown" id="col-dropdown-full" style="display:none">
+              <label class="col-check"><input type="checkbox" data-col="col-domain" checked> Domain</label>
+              <label class="col-check"><input type="checkbox" data-col="col-status" checked> Status</label>
+              <label class="col-check"><input type="checkbox" data-col="col-domain-exp" checked> Domain Exp</label>
+              <label class="col-check"><input type="checkbox" data-col="col-ssl-exp" checked> SSL Exp</label>
+              <label class="col-check"><input type="checkbox" data-col="col-registrar" checked> Registrar</label>
+              <label class="col-check"><input type="checkbox" data-col="col-checked" checked> Last Checked</label>
+              <label class="col-check"><input type="checkbox" data-col="col-actions" checked> Actions</label>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-secondary" data-action="refresh-domains">&#x21bb; Refresh</button>
+        </div>
+      </div>
+
+      <div class="stats-bar">
+        <div class="stat total"><span class="stat-count" id="stat-full-total">0</span> Total</div>
+        <div class="stat healthy"><span class="stat-count" id="stat-full-healthy">0</span> Healthy (&gt;90d)</div>
+        <div class="stat warning"><span class="stat-count" id="stat-full-warning">0</span> Watch (&lt;90d)</div>
+        <div class="stat danger"><span class="stat-count" id="stat-full-danger">0</span> Expired</div>
+        <div class="stat pending"><span class="stat-count" id="stat-full-pending">0</span> Pending</div>
+        <div class="stat error"><span class="stat-count" id="stat-full-error">0</span> Error</div>
+      </div>
+      <div id="domain-list-full" class="domain-list"></div>
+      <table id="domain-table-full" class="domain-table" style="display:none">
+        <thead><tr><th class="col-checkbox"></th><th class="col-domain" data-sort="url" data-type="full">Domain <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-status" data-sort="status" data-type="full">Status <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-domain-exp" data-sort="days" data-type="full">Domain Expiry <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-ssl-exp" data-sort="days" data-type="full">SSL Expiry <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-registrar" data-sort="registrar" data-type="full">Registrar <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-checked" data-sort="checked" data-type="full">Last Checked <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-actions">Actions</th></tr></thead>
+        <tbody id="domain-table-body-full"></tbody>
+      </table>
+      <div class="pagination-wrapper" id="pagination-full" style="display:none">
+        <div class="pagination-info">Showing <span id="page-from-full">0</span>-<span id="page-to-full">0</span> of <span id="page-total-full">0</span></div>
+        <div class="pagination-controls">
+          <button class="btn btn-sm btn-secondary" data-action="page-first-full" id="page-first-full">&#171;</button>
+          <button class="btn btn-sm btn-secondary" data-action="page-prev-full" id="page-prev-full">&#8249;</button>
+          <select id="page-size-full" class="page-size-select">
+            <option value="25">25/page</option>
+            <option value="50">50/page</option>
+            <option value="100">100/page</option>
+          </select>
+          <button class="btn btn-sm btn-secondary" data-action="page-next-full" id="page-next-full">&#8250;</button>
+          <button class="btn btn-sm btn-secondary" data-action="page-last-full" id="page-last-full">&#187;</button>
+        </div>
+      </div>
+      <div id="empty-state-full" class="empty-state" style="display:none">
+        <p>No domains monitored yet.</p>
+        <div class="empty-actions">
+          <button class="btn btn-primary" data-action="add-domain-full">Add your first domain</button>
+          <button class="btn btn-secondary" data-action="download-template">Download import template</button>
+        </div>
+        <div class="empty-suggestions" id="empty-suggestions"></div>
+      </div>
+    </section>
+
+    <!-- SSL Certs View -->
+    <section id="view-sslcerts" class="view">
+      <div class="view-header">
+        <div>
+          <h2>SSL Certificates</h2>
+          <p class="view-subtitle">Track certificate expiry, issuer details, and SSL-only endpoints.</p>
+        </div>
+        <div class="header-actions">
+          <input type="text" id="ssl-search" class="domain-search-input" placeholder="Search SSL certs...">
+          <select id="ssl-tld-filter" class="tld-filter" title="Filter by TLD">
+            <option value="">All TLDs</option>
+          </select>
+          <button class="btn btn-secondary" data-action="toggle-view-ssl" title="Switch to table view"><span class="view-toggle-icon">&#9776;</span><span class="view-toggle-label">Table</span></button>
+          <button class="btn btn-secondary" data-action="export">Export</button>
+          <button class="btn btn-secondary" data-action="import">Import</button>
+          <button class="btn btn-secondary" data-action="check-all-ssl" id="btn-check-all-ssl">Check All</button>
+          <button class="btn btn-primary" data-action="add-domain-ssl">+ Add SSL Domain</button>
+        </div>
+      </div>
+      <div class="domain-list-summary" id="domain-summary-ssl">
+        <span id="domain-result-ssl">Showing 0 SSL certificates</span>
+        <button class="btn btn-sm btn-secondary" data-action="clear-domain-filters" data-type="ssl_only" style="display:none">Clear filters</button>
+      </div>
+
+      <div class="domain-filters" id="ssl-domain-filters">
+        <button class="log-filter active" data-ssl-filter="all">All</button>
+        <button class="log-filter" data-ssl-filter="healthy">Healthy</button>
+        <button class="log-filter" data-ssl-filter="watch">Watch</button>
+        <button class="log-filter" data-ssl-filter="caution">Caution</button>
+        <button class="log-filter" data-ssl-filter="warning">Warning</button>
+        <button class="log-filter" data-ssl-filter="critical">Critical</button>
+        <button class="log-filter" data-ssl-filter="expired">Expired</button>
+        <button class="log-filter" data-ssl-filter="error">Error</button>
+      </div>
+
+      <div class="bulk-toolbar" id="ssl-bulk-toolbar" style="display:none">
+        <label class="bulk-select-all"><input type="checkbox" id="select-all-ssl"> Select All</label>
+        <span id="ssl-bulk-count">0 selected</span>
+        <button class="btn btn-sm btn-secondary" data-action="ssl-bulk-check">Check Selected</button>
+        <button class="btn btn-sm btn-danger" data-action="ssl-bulk-delete">Delete Selected</button>
+        <button class="btn btn-sm btn-secondary" data-action="ssl-bulk-export">Export Selected</button>
+        <button class="btn btn-sm btn-secondary" data-action="ssl-bulk-notes">Add Notes</button>
+        <button class="btn btn-sm btn-secondary" data-action="ssl-bulk-tags">Manage Tags</button>
+        <button class="btn btn-sm btn-secondary" data-action="ssl-bulk-compare">Compare</button>
+        <button class="btn btn-sm btn-secondary" data-action="print-view">Print</button>
+        <button class="btn btn-sm btn-secondary" data-action="ssl-bulk-deselect">Clear</button>
+      </div>
+
+      <div class="sort-bar" id="sort-bar-ssl">
+        <button class="sort-btn active" data-sort="url" data-type="ssl_only">Name <span class="sort-arrow">&#9650;</span></button>
+        <button class="sort-btn" data-sort="status" data-type="ssl_only">Status</button>
+        <button class="sort-btn" data-sort="days" data-type="ssl_only">Days Left</button>
+        <button class="sort-btn" data-sort="checked" data-type="ssl_only">Last Checked</button>
+        <div class="sort-right">
+          <label class="sort-toggle"><input type="checkbox" id="ssl-group-by-status"> Group by status</label>
+          <div class="column-toggle" id="col-toggle-ssl">
+            <button class="btn btn-sm btn-secondary" data-action="toggle-columns-ssl">&#9776; Columns</button>
+            <div class="column-dropdown" id="col-dropdown-ssl" style="display:none">
+              <label class="col-check"><input type="checkbox" data-col="col-domain" checked> Domain</label>
+              <label class="col-check"><input type="checkbox" data-col="col-status" checked> Status</label>
+              <label class="col-check"><input type="checkbox" data-col="col-ssl-exp" checked> SSL Exp</label>
+              <label class="col-check"><input type="checkbox" data-col="col-issuer" checked> Issuer</label>
+              <label class="col-check"><input type="checkbox" data-col="col-checked" checked> Last Checked</label>
+              <label class="col-check"><input type="checkbox" data-col="col-actions" checked> Actions</label>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-secondary" data-action="refresh-domains">&#x21bb; Refresh</button>
+        </div>
+      </div>
+
+      <div class="stats-bar">
+        <div class="stat total"><span class="stat-count" id="stat-ssl-total">0</span> Total</div>
+        <div class="stat healthy"><span class="stat-count" id="stat-ssl-healthy">0</span> Healthy</div>
+        <div class="stat warning"><span class="stat-count" id="stat-ssl-warning">0</span> Watch (≤30d)</div>
+        <div class="stat danger"><span class="stat-count" id="stat-ssl-danger">0</span> Expired</div>
+        <div class="stat pending"><span class="stat-count" id="stat-ssl-pending">0</span> Pending</div>
+        <div class="stat error"><span class="stat-count" id="stat-ssl-error">0</span> Error</div>
+      </div>
+      <div id="domain-list-ssl" class="domain-list"></div>
+      <table id="domain-table-ssl" class="domain-table" style="display:none">
+        <thead><tr><th class="col-checkbox"></th><th class="col-domain" data-sort="url" data-type="ssl_only">Domain <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-status" data-sort="status" data-type="ssl_only">Status <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-ssl-exp" data-sort="days" data-type="ssl_only">SSL Expiry <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-issuer" data-sort="issuer" data-type="ssl_only">Issuer <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-checked" data-sort="checked" data-type="ssl_only">Last Checked <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-actions">Actions</th></tr></thead>
+        <tbody id="domain-table-body-ssl"></tbody>
+      </table>
+      <div class="pagination-wrapper" id="pagination-ssl" style="display:none">
+        <div class="pagination-info">Showing <span id="page-from-ssl">0</span>-<span id="page-to-ssl">0</span> of <span id="page-total-ssl">0</span></div>
+        <div class="pagination-controls">
+          <button class="btn btn-sm btn-secondary" data-action="page-first-ssl" id="page-first-ssl">&#171;</button>
+          <button class="btn btn-sm btn-secondary" data-action="page-prev-ssl" id="page-prev-ssl">&#8249;</button>
+          <select id="page-size-ssl" class="page-size-select">
+            <option value="25">25/page</option>
+            <option value="50">50/page</option>
+            <option value="100">100/page</option>
+          </select>
+          <button class="btn btn-sm btn-secondary" data-action="page-next-ssl" id="page-next-ssl">&#8250;</button>
+          <button class="btn btn-sm btn-secondary" data-action="page-last-ssl" id="page-last-ssl">&#187;</button>
+        </div>
+      </div>
+      <div id="empty-state-ssl" class="empty-state" style="display:none">
+        <p>No SSL-only domains monitored yet.</p>
+        <div class="empty-actions">
+          <button class="btn btn-primary" data-action="add-domain-ssl">Add your first SSL domain</button>
+          <button class="btn btn-secondary" data-action="download-template-ssl">Download import template</button>
+        </div>
+        <div class="empty-suggestions" id="ssl-empty-suggestions"></div>
+      </div>
+    </section>
+
+    <!-- Settings View -->
+    <section id="view-settings" class="view">
+      <div class="view-header">
+        <h2>Settings</h2>
+        <div class="header-actions">
+          <button class="btn btn-secondary" data-action="export-settings" title="Export all settings as JSON">Export</button>
+          <button class="btn btn-secondary" data-action="import-settings" title="Import settings from JSON">Import</button>
+        </div>
+      </div>
+
+      <input type="file" id="settings-import-input" accept=".json" style="display:none">
+
+      <div class="settings-tabs" id="settings-tabs">
+        <button class="settings-tab active" data-stab="smtp" tabindex="0">SMTP</button>
+        <button class="settings-tab" data-stab="webhooks" tabindex="0">Webhooks</button>
+        <button class="settings-tab" data-stab="users" tabindex="0">Users</button>
+        <button class="settings-tab" data-stab="security" tabindex="0">Security</button>
+        <button class="settings-tab" data-stab="apikeys" tabindex="0">API Keys</button>
+        <button class="settings-tab" data-stab="backups" tabindex="0">Backups</button>
+        <button class="settings-tab" data-stab="emailtpl" tabindex="0">Email Templates</button>
+      </div>
+
+      <!-- SMTP -->
+      <div class="settings-pane active" id="stab-smtp">
+        <div class="pane-header">
+          <div>
+            <h3>SMTP Alerts</h3>
+            <p class="pane-subtitle">Configure email delivery and the default expiry thresholds used by monitored domains.</p>
+          </div>
+        </div>
+        <form id="settings-form" class="settings-form">
+          <div id="smtp-env-banner" class="settings-notice" style="display:none">SMTP settings are configured via <code>.env</code> and are read-only here.</div>
+          <fieldset>
+            <legend>SMTP Configuration</legend>
+            <div class="form-row">
+              <label for="smtp_server">SMTP Server <span class="env-badge">.env</span></label>
+              <input type="text" id="smtp_server" value="smtp.gmail.com" data-validate="hostname" data-env-managed="true">
+              <span class="field-error" id="err-smtp_server"></span>
+            </div>
+            <div class="form-row">
+              <label for="smtp_port">Port <span class="env-badge">.env</span></label>
+              <input type="number" id="smtp_port" value="587" min="1" max="65535" data-validate="port" data-env-managed="true">
+              <span class="field-error" id="err-smtp_port"></span>
+            </div>
+            <div class="form-row">
+              <label for="smtp_email">Username (email) <span class="env-badge">.env</span></label>
+              <input type="email" id="smtp_email" placeholder="you@gmail.com" data-validate="email" data-env-managed="true">
+              <span class="field-error" id="err-smtp_email"></span>
+            </div>
+            <div class="form-row">
+              <label for="smtp_password">Password (App Password) <span class="env-badge">.env</span></label>
+              <div class="password-field">
+                <input type="password" id="smtp_password" autocomplete="off" data-env-managed="true">
+                <button type="button" class="toggle-pw" data-action="toggle-pw-visibility" data-target="smtp_password">&#128065;</button>
+              </div>
+              <span class="field-hint" id="smtp-pw-hint"></span>
+            </div>
+            <div class="form-row">
+              <label for="alert_emails">Alert Recipient Emails (comma-separated) <span class="env-badge">.env</span></label>
+              <input type="text" id="alert_emails" placeholder="admin@example.com, you@gmail.com" data-validate="emails" data-env-managed="true">
+              <span class="field-error" id="err-alert_emails"></span>
+            </div>
+            <div class="form-row checkbox-row">
+              <label><input type="checkbox" id="smtp_enabled"> Enable SMTP alerts</label>
+            </div>
+            <div class="smtp-status" id="smtp-status"><span class="dot unknown"></span><span id="smtp-status-text">Not tested</span></div>
+            <div class="smtp-test-log" id="smtp-test-log" style="display:none"></div>
+          </fieldset>
+          <fieldset>
+            <legend>Alert Thresholds</legend>
+            <div class="form-row">
+              <label for="ssl_alert_threshold">SSL Expiry Alert (days)</label>
+              <input type="number" id="ssl_alert_threshold" value="30" min="1" max="365" data-validate="positive-int">
+              <span class="field-error" id="err-ssl_alert_threshold"></span>
+            </div>
+            <div class="form-row">
+              <label for="domain_alert_threshold">Domain Expiry Alert (days)</label>
+              <input type="number" id="domain_alert_threshold" value="30" min="1" max="365" data-validate="positive-int">
+              <span class="field-error" id="err-domain_alert_threshold"></span>
+            </div>
+          </fieldset>
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary" data-action="reset-smtp" title="Reset to defaults">Reset</button>
+            <button type="button" class="btn btn-secondary" data-action="test-smtp" id="btn-test-smtp">Test SMTP</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-settings">Save Settings</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Webhooks -->
+      <div class="settings-pane" id="stab-webhooks">
+        <div class="pane-header">
+          <div>
+            <h3>Webhooks</h3>
+            <p class="pane-subtitle">Send alert events to team chat channels for Slack or Zulip.</p>
+          </div>
+        </div>
+        <form id="webhooks-form" class="settings-form">
+          <fieldset>
+            <legend>Slack</legend>
+            <div class="form-row">
+              <label for="slack_webhook_url">Slack Incoming Webhook URL</label>
+              <input type="url" id="slack_webhook_url" placeholder="https://hooks.slack.com/services/xxx/yyy/zzz">
+              <span class="field-hint">Create at Slack API → Incoming Webhooks</span>
+            </div>
+            <div class="form-row checkbox-row">
+              <label><input type="checkbox" id="slack_enabled"> Enable Slack alerts</label>
+            </div>
+            <div class="form-actions" style="margin-top:8px">
+              <button type="button" class="btn btn-secondary" data-action="test-webhook" data-webhook-type="slack">Test Slack</button>
+              <span id="test-slack-result" class="inline-result"></span>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Zulip</legend>
+            <div class="form-row">
+              <label for="zulip_webhook_url">Zulip Incoming Webhook URL</label>
+              <input type="url" id="zulip_webhook_url" placeholder="https://yourzulip.zulipchat.com/api/v1/external/webhook?api_key=xxx&stream=ssl-alerts">
+              <span class="field-hint">Create at Zulip Settings → Personal → Bots → Incoming webhook</span>
+            </div>
+            <div class="form-row checkbox-row">
+              <label><input type="checkbox" id="zulip_enabled"> Enable Zulip alerts</label>
+            </div>
+            <div class="form-actions" style="margin-top:8px">
+              <button type="button" class="btn btn-secondary" data-action="test-webhook" data-webhook-type="zulip">Test Zulip</button>
+              <span id="test-zulip-result" class="inline-result"></span>
+            </div>
+          </fieldset>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="btn-save-webhooks">Save Webhook Settings</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Users -->
+      <div class="settings-pane" id="stab-users">
+        <div class="pane-header">
+          <div>
+            <h3>Manage Users</h3>
+            <p class="pane-subtitle">Create accounts, review access, and disable users without removing their history.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-secondary" data-action="refresh-users">Refresh</button>
+            <button class="btn btn-primary" data-action="add-user">+ Add User</button>
+          </div>
+        </div>
+        <div class="user-summary" id="user-summary">
+          <div class="user-summary-card"><span id="user-total-count">0</span>Total</div>
+          <div class="user-summary-card"><span id="user-admin-count">0</span>Admins</div>
+          <div class="user-summary-card"><span id="user-active-count">0</span>Active</div>
+          <div class="user-summary-card attention"><span id="user-risk-count">0</span>Failed logins</div>
+        </div>
+        <div class="user-toolbar">
+          <input type="search" id="user-search" placeholder="Search users" autocomplete="off">
+          <select id="user-role-filter" aria-label="Filter users by role">
+            <option value="all">All roles</option>
+            <option value="admin">Admins</option>
+            <option value="user">Users</option>
+            <option value="viewer">Viewers</option>
+          </select>
+          <select id="user-status-filter" aria-label="Filter users by status">
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
+        <div class="user-table-wrapper">
+          <table id="user-table">
+            <thead>
+              <tr><th>User</th><th>Role</th><th>Status</th><th>Last Login</th><th>Login Fails</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="user-body"></tbody>
+          </table>
+        </div>
+        <div class="empty-state compact" id="user-empty" style="display:none">
+          <p>No users match the current filters.</p>
+          <button class="btn btn-secondary" data-action="clear-user-filters">Clear filters</button>
+        </div>
+      </div>
+
+      <!-- Security -->
+      <div class="settings-pane" id="stab-security">
+        <div class="pane-header">
+          <div>
+            <h3>Security</h3>
+            <p class="pane-subtitle">Control session expiry, login lockouts, and password requirements for new credentials.</p>
+          </div>
+        </div>
+        <form id="security-form" class="settings-form">
+          <fieldset>
+            <legend>Session &amp; Login</legend>
+            <div class="form-row">
+              <label for="session_timeout">Session Idle Timeout (minutes)</label>
+              <input type="number" id="session_timeout" value="60" min="5" max="1440">
+              <span class="field-hint">Auto-logout after inactivity</span>
+            </div>
+            <div class="form-row">
+              <label for="max_login_attempts">Max Login Attempts</label>
+              <input type="number" id="max_login_attempts" value="5" min="1" max="20">
+              <span class="field-hint">Lock account after this many failures</span>
+            </div>
+            <div class="form-row">
+              <label for="lockout_duration">Lockout Duration (minutes)</label>
+              <input type="number" id="lockout_duration" value="15" min="1" max="120">
+              <span class="field-hint">How long to lock after max failures</span>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Password Policy</legend>
+            <div class="form-row">
+              <label for="min_password_length">Minimum Password Length</label>
+              <input type="number" id="min_password_length" value="8" min="4" max="128">
+            </div>
+            <div class="form-row checkbox-row">
+              <label><input type="checkbox" id="require_uppercase"> Require uppercase letter</label>
+            </div>
+            <div class="form-row checkbox-row">
+              <label><input type="checkbox" id="require_lowercase"> Require lowercase letter</label>
+            </div>
+            <div class="form-row checkbox-row">
+              <label><input type="checkbox" id="require_number"> Require number</label>
+            </div>
+            <div class="form-row checkbox-row">
+              <label><input type="checkbox" id="require_special"> Require special character (!@#$%^&*)</label>
+            </div>
+          </fieldset>
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary" data-action="reset-security" title="Reset to defaults">Reset</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-security">Save Security</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- API Keys -->
+      <div class="settings-pane" id="stab-apikeys">
+        <div class="pane-header">
+          <div>
+            <h3>API Keys</h3>
+            <p class="pane-subtitle">Create tokens for external integrations and revoke keys that are no longer needed.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-secondary" data-action="refresh-api-keys">Refresh</button>
+            <button class="btn btn-danger" data-action="bulk-revoke-apikeys" id="btn-bulk-revoke" style="display:none">Revoke Selected</button>
+            <button class="btn btn-primary" data-action="generate-apikey">+ Generate Key</button>
+          </div>
+        </div>
+        <div class="api-keys-list" id="api-keys-list"></div>
+      </div>
+
+      <!-- Backups -->
+      <div class="settings-pane" id="stab-backups">
+        <div class="pane-header">
+          <div>
+            <h3>Database Backups</h3>
+            <p class="pane-subtitle">Download snapshots or restore a previous copy of the SQLite database.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-secondary" data-action="refresh-backups">Refresh</button>
+            <button class="btn btn-primary" data-action="create-backup">+ Create Backup</button>
+          </div>
+        </div>
+        <p class="pane-note">Daily backups run at 03:00. Maximum <span id="max-backups-info">30</span> backups retained.</p>
+        <div class="backups-list" id="backups-list"></div>
+      </div>
+
+      <!-- Email Templates -->
+      <div class="settings-pane" id="stab-emailtpl">
+        <div class="pane-header">
+          <div>
+            <h3>Email Templates</h3>
+            <p class="pane-subtitle">Customize the messages sent for SSL, domain, and check-summary notifications.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-secondary" data-action="refresh-email-templates">Refresh</button>
+            <button class="btn btn-secondary" data-action="reset-email-templates">Reset to Defaults</button>
+          </div>
+        </div>
+        <div class="email-tpl-tabs" id="email-tpl-tabs">
+          <button class="email-tpl-tab active" data-tpl="ssl_alert">SSL Alert</button>
+          <button class="email-tpl-tab" data-tpl="domain_alert">Domain Alert</button>
+          <button class="email-tpl-tab" data-tpl="check_complete">Check Complete</button>
+        </div>
+        <form id="email-tpl-form" class="settings-form email-template-form">
+          <div class="form-row">
+            <label for="email-tpl-subject">Subject</label>
+            <input type="text" id="email-tpl-subject">
+            <span class="field-hint">Variables: {domain}, {status}, {ssl_days_left}, {domain_days_left}, {ssl_expiry}, {domain_expiry}, {issuer}, {registrar}, {date}, {total}, {healthy}, {warning}, {expired}</span>
+          </div>
+          <div class="form-row">
+            <label for="email-tpl-html">HTML Body</label>
+            <textarea id="email-tpl-html" rows="12" class="code-textarea"></textarea>
+          </div>
+          <div class="form-row">
+            <label for="email-tpl-text">Plain Text Body</label>
+            <textarea id="email-tpl-text" rows="6" class="code-textarea"></textarea>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary" data-action="preview-email-tpl">Preview</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-template">Save Template</button>
+          </div>
+        </form>
+        <div id="email-tpl-preview" class="email-tpl-preview" style="display:none"></div>
+      </div>
+
+      <div class="settings-footer">
+        <button class="btn btn-secondary" data-action="export-settings">Export Settings</button>
+        <button class="btn btn-secondary" data-action="import-settings">Import Settings</button>
+        <span class="unsaved-indicator" id="unsaved-indicator" style="display:none">Unsaved changes</span>
+      </div>
+      <div id="settings-message" class="form-message"></div>
+    </section>
+
+    <!-- Logs View -->
+    <section id="view-logs" class="view">
+      <div class="view-header">
+        <div>
+          <h2>Activity Logs</h2>
+          <p class="view-subtitle">Audit recent checks, alerts, account activity, and settings changes.</p>
+        </div>
+        <div class="header-actions log-controls">
+          <input type="search" id="log-search" class="log-search-input" placeholder="Search logs" autocomplete="off">
+          <select id="log-limit" class="log-limit-select">
+            <option value="10" selected>10 lines</option>
+            <option value="25">25 lines</option>
+            <option value="50">50 lines</option>
+            <option value="100">100 lines</option>
+          </select>
+          <div class="log-pagination" id="log-pagination">
+            <button class="btn btn-sm" data-action="log-prev" id="log-prev-btn">Prev</button>
+            <span id="log-page-info" class="log-page-info">Page 1</span>
+            <button class="btn btn-sm" data-action="log-next" id="log-next-btn">Next</button>
+          </div>
+          <button class="btn btn-secondary" data-action="refresh-logs">Refresh</button>
+        </div>
+      </div>
+      <div class="log-summary" id="log-summary">
+        <div class="log-summary-card"><span id="log-total-count">0</span>Total</div>
+        <div class="log-summary-card"><span id="log-check-count">0</span>Checks</div>
+        <div class="log-summary-card"><span id="log-alert-count">0</span>Alerts</div>
+        <div class="log-summary-card attention"><span id="log-error-count">0</span>Errors</div>
+      </div>
+      <div class="log-filters" id="log-filters">
+        <button class="log-filter active" data-log-filter="all">All</button>
+        <button class="log-filter" data-log-filter="check">Checks</button>
+        <button class="log-filter" data-log-filter="alert">Alerts</button>
+        <button class="log-filter" data-log-filter="error">Errors</button>
+        <button class="log-filter" data-log-filter="info">Info</button>
+        <button class="log-filter" data-log-filter="settings_change">Settings</button>
+      </div>
+      <div class="log-activity">
+        <div class="log-activity-header">
+          <h4>Current Page Activity</h4>
+          <span id="log-range-info">Showing 0 logs</span>
+        </div>
+        <div class="activity-bars" id="activity-bars"></div>
+        <div class="activity-labels" id="activity-labels"></div>
+      </div>
+      <div class="log-table-wrapper">
+        <table id="log-table">
+          <thead><tr><th>Time</th><th>Domain</th><th>User</th><th>Type</th><th>Message</th></tr></thead>
+          <tbody id="log-body"></tbody>
+        </table>
+      </div>
+      <div class="log-mobile" id="log-mobile"></div>
+    </section>
+  </main>
+
+  <!-- Add/Edit Domain Modal -->
+  <div id="domain-modal" class="modal">
+    <div class="modal-backdrop" data-action="close-domain-modal"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-title">Add Domain</h3>
+        <button class="modal-close" data-action="close-domain-modal">&times;</button>
+      </div>
+      <form id="domain-form">
+        <input type="hidden" id="domain-id">
+        <input type="hidden" id="domain-type-input" value="full">
+        <div class="form-row">
+          <label for="domain-url">URL / Domain</label>
+          <input type="text" id="domain-url" placeholder="example.com" required>
+        </div>
+        <div class="form-row">
+          <label for="domain-interval">Check Interval (minutes)</label>
+          <input type="number" id="domain-interval" value="360" min="1">
+        </div>
+        <div class="form-row">
+          <label for="domain-notes">Notes</label>
+          <textarea id="domain-notes" rows="2" placeholder="Optional notes"></textarea>
+        </div>
+        <div class="form-row">
+          <label for="domain-manual-expiry">Manual Domain Expiry (if WHOIS fails)</label>
+          <input type="date" id="domain-manual-expiry">
+        </div>
+        <div class="form-row">
+          <label for="domain-manual-registrar">Domain Registrar (optional)</label>
+          <input type="text" id="domain-manual-registrar" placeholder="e.g. GoDaddy, NameCheap">
+        </div>
+        <fieldset>
+          <legend>Alert Overrides (leave blank to use global)</legend>
+          <div class="form-row">
+            <label for="domain-ssl-threshold">SSL Alert Threshold (days)</label>
+            <input type="number" id="domain-ssl-threshold" placeholder="Default" min="1" max="365">
+          </div>
+          <div class="form-row" id="domain-domain-threshold-row">
+            <label for="domain-domain-threshold">Domain Alert Threshold (days)</label>
+            <input type="number" id="domain-domain-threshold" placeholder="Default" min="1" max="365">
+          </div>
+        </fieldset>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" data-action="close-domain-modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-save-domain">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- User Modal -->
+  <div id="user-modal" class="modal">
+    <div class="modal-backdrop" data-action="close-user-modal"></div>
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <h3 id="user-modal-title">Add User</h3>
+        <button class="modal-close" data-action="close-user-modal">&times;</button>
+      </div>
+      <form id="user-form">
+        <input type="hidden" id="user-id">
+        <div class="form-row">
+          <label for="user-username">Username</label>
+          <input type="text" id="user-username" required>
+          <span class="field-hint" id="user-username-hint"></span>
+        </div>
+        <div class="form-row">
+          <label for="user-password">Password</label>
+          <div class="password-field">
+            <input type="password" id="user-password" autocomplete="new-password">
+            <button type="button" class="toggle-pw" data-action="toggle-pw-visibility" data-target="user-password">&#128065;</button>
+          </div>
+          <div class="pw-strength" id="pw-strength">
+            <div class="pw-strength-bar"><div class="pw-strength-fill" id="pw-strength-fill"></div></div>
+            <span class="pw-strength-label" id="pw-strength-label"></span>
+          </div>
+          <div class="pw-requirements" id="pw-requirements">
+            <div class="pw-req" data-req="length">Min length</div>
+            <div class="pw-req" data-req="upper">Uppercase</div>
+            <div class="pw-req" data-req="lower">Lowercase</div>
+            <div class="pw-req" data-req="number">Number</div>
+            <div class="pw-req" data-req="special">Special char</div>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="user-role">Role</label>
+          <select id="user-role">
+            <option value="admin">Admin</option>
+            <option value="viewer">Viewer</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" data-action="close-user-modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-save-user">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Confirm Delete Modal -->
+  <div id="confirm-modal" class="modal">
+    <div class="modal-backdrop" data-action="close-confirm-modal"></div>
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <h3 id="confirm-modal-title">Confirm Delete</h3>
+        <button class="modal-close" data-action="close-confirm-modal">&times;</button>
+      </div>
+      <p id="confirm-text" class="confirm-text"></p>
+      <div id="confirm-username-row" style="display:none" class="form-row">
+        <label for="confirm-username-input">Type the username to confirm</label>
+        <input type="text" id="confirm-username-input" autocomplete="off">
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" data-action="close-confirm-modal">Cancel</button>
+        <button class="btn btn-danger" id="confirm-delete-btn" disabled>Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cert Details Modal -->
+  <div id="cert-modal" class="modal">
+    <div class="modal-backdrop" data-action="close-cert-modal"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Certificate Details</h3>
+        <button class="modal-close" data-action="close-cert-modal">&times;</button>
+      </div>
+      <div id="cert-details" class="cert-details">
+        <div class="cert-loading">Loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import Modal -->
+  <div id="import-modal" class="modal">
+    <div class="modal-backdrop" data-action="close-import-modal"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Import SSL Domains</h3>
+        <button class="modal-close" data-action="close-import-modal">&times;</button>
+      </div>
+      <div id="import-form">
+        <p class="confirm-text">Upload a .json, .csv, or .txt file, or paste JSON or one domain per line below:</p>
+        <input id="import-file" type="file" accept=".json,.csv,.txt" style="width:100%;margin-bottom:8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px;font-size:13px;">
+        <div style="text-align:center;color:var(--text-muted);font-size:12px;margin-bottom:6px;">— or —</div>
+        <textarea id="import-json" rows="8" style="width:100%;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:10px;font-size:13px;font-family:monospace;resize:vertical;" placeholder='Paste JSON or one domain per line (e.g. example.com)'></textarea>
+        <div class="form-actions" style="margin-top:12px">
+          <button class="btn btn-secondary" data-action="close-import-modal">Cancel</button>
+          <button class="btn btn-primary" data-action="do-import">Import</button>
+        </div>
+      </div>
+      <div id="import-result" class="form-message" style="margin-top:12px"></div>
+      <div id="import-details" style="display:none;margin-top:12px"></div>
+    </div>
+  </div>
+
+  <div class="check-progress-bg" id="check-progress"><div class="check-progress-bar" id="check-progress-bar"></div></div>
+  <div class="toast-container" id="toast-container"></div>
+  <button class="back-to-top" id="back-to-top" data-action="back-to-top" title="Back to top">&#8593;</button>
+
+  <div id="compare-modal" class="modal">
+    <div class="modal-backdrop" data-action="close-compare-modal"></div>
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <h3>Compare Domains</h3>
+        <button class="modal-close" data-action="close-compare-modal">&times;</button>
+      </div>
+      <div id="compare-content" class="compare-grid"></div>
+    </div>
+  </div>
+
+  <div id="bulk-tags-modal" class="modal">
+    <div class="modal-backdrop" data-action="close-bulk-tags"></div>
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <h3>Manage Tags</h3>
+        <button class="modal-close" data-action="close-bulk-tags">&times;</button>
+      </div>
+      <div class="form-row">
+        <label>Tags (comma-separated)</label>
+        <input type="text" id="bulk-tags-input" placeholder="production, critical, client-a">
+      </div>
+      <div class="form-row">
+        <label>Mode</label>
+        <select id="bulk-tags-mode">
+          <option value="replace">Replace all tags</option>
+          <option value="add">Add to existing</option>
+          <option value="remove">Remove specified</option>
+        </select>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" data-action="close-bulk-tags">Cancel</button>
+        <button class="btn btn-primary" data-action="submit-bulk-tags">Apply</button>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <!-- Quick Add Modal -->
+  <div id="quickadd-modal" class="modal">
+    <div class="modal-backdrop" data-action="close-quickadd-modal"></div>
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <h3>Quick Add Domain</h3>
+        <button class="modal-close" data-action="close-quickadd-modal">&times;</button>
+      </div>
+      <form id="quickadd-form">
+        <div class="form-row">
+          <label for="quickadd-url">URL / Domain</label>
+          <input type="text" id="quickadd-url" placeholder="example.com" required autofocus>
+        </div>
+        <div class="form-row">
+          <label for="quickadd-type">Type</label>
+          <select id="quickadd-type">
+            <option value="full">Full (SSL + WHOIS)</option>
+            <option value="ssl_only">SSL Only</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" data-action="close-quickadd-modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-quickadd-save">Add</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
