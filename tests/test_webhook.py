@@ -12,7 +12,7 @@ class TestWebhookAlerts:
         assert errors == []
 
     def test_slack_webhook_success(self):
-        settings = {"slack_webhook_url": "https://hooks.slack.com/test"}
+        settings = {"slack_webhook_url": "https://hooks.slack.com/test", "slack_enabled": True}
         with patch("webhook.requests.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -21,7 +21,7 @@ class TestWebhookAlerts:
         assert errors == []
 
     def test_slack_webhook_http_error(self):
-        settings = {"slack_webhook_url": "https://hooks.slack.com/test"}
+        settings = {"slack_webhook_url": "https://hooks.slack.com/test", "slack_enabled": True}
         with patch("webhook.requests.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 400
@@ -31,7 +31,7 @@ class TestWebhookAlerts:
         assert "Slack" in errors[0]
 
     def test_zulip_webhook_success(self):
-        settings = {"zulip_webhook_url": "https://zulip.example.com/webhook"}
+        settings = {"zulip_webhook_url": "https://zulip.example.com/webhook", "zulip_enabled": True}
         with patch("webhook.requests.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -40,7 +40,7 @@ class TestWebhookAlerts:
         assert errors == []
 
     def test_zulip_webhook_http_error(self):
-        settings = {"zulip_webhook_url": "https://zulip.example.com/webhook"}
+        settings = {"zulip_webhook_url": "https://zulip.example.com/webhook", "zulip_enabled": True}
         with patch("webhook.requests.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 500
@@ -53,6 +53,8 @@ class TestWebhookAlerts:
         settings = {
             "slack_webhook_url": "https://hooks.slack.com/test",
             "zulip_webhook_url": "https://zulip.example.com/webhook",
+            "slack_enabled": True,
+            "zulip_enabled": True,
         }
         with patch("webhook.requests.post") as mock_post:
             mock_response = MagicMock()

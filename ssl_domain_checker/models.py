@@ -708,7 +708,7 @@ def save_check_results_batch(results):
 def cleanup_old_data(retention_days=90):
     """Remove check history, logs, and stale rate-limit entries older than retention_days."""
     conn = get_db()
-    cutoff = (timezone_now() - datetime.timedelta(days=retention_days)).strftime('%Y-%m-%d %H:%M:%S')
+    cutoff = timezone_now() - datetime.timedelta(days=retention_days)
     deleted = conn.execute("DELETE FROM check_results WHERE checked_at < ?", (cutoff,)).rowcount
     deleted += conn.execute("DELETE FROM logs WHERE created_at < ?", (cutoff,)).rowcount
     deleted += conn.execute(
@@ -955,8 +955,8 @@ def is_user_locked(username):
     if not row or row['login_fails'] < max_attempts:
         return False
     if row['last_fail']:
-        last = datetime.datetime.fromisoformat(row['last_fail'])
-        if (timezone_now() - last) < datetime.timedelta(minutes=lockout):
+        last = parse_dt(row['last_fail'])
+        if last and (timezone_now() - last) < datetime.timedelta(minutes=lockout):
             return True
         conn.execute("UPDATE users SET login_fails=0 WHERE username=?", (username,))
         conn.commit()

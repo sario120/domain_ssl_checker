@@ -366,6 +366,7 @@ def health():
 
 
 @app.route('/api/metrics')
+@login_required
 def prometheus_metrics():
     try:
         status_counts = models.get_domain_status_counts()
@@ -1251,6 +1252,17 @@ def check_all_background():
             models.add_logs_batch(log_entries)
             models.update_check_run(run_id, len(results), 'completed')
             models.save_health_snapshot()
+
+            # Send individual alerts for expired/expiring/error domains
+            try:
+                settings = models.get_settings()
+                domain_map = {d['id']: d for d in domains}
+                for r in results:
+                    domain = domain_map.get(r.get('domain_id'))
+                    if domain and r.get('status') in ('expired', 'expiring_soon', 'error'):
+                        _maybe_send_alert(domain, r, settings)
+            except Exception as e:
+                logger.warning("Failed to send individual alerts: %s", e)
 
             # Send check complete summary email (once per day max)
             try:

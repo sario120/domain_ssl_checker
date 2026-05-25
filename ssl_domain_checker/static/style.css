@@ -1188,7 +1188,8 @@ legend { font-weight: 600; font-size: 15px; padding: 0 8px; color: var(--primary
 .domain-table tbody tr:hover { background: var(--bg-hover); }
 .domain-table .table-url {
   color: var(--primary); text-decoration: none; font-weight: 500;
-  overflow: hidden; text-overflow: ellipsis; max-width: 200px; display: inline-block; vertical-align: middle;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 1 1 auto; min-width: 0;
 }
 .domain-table .table-url:hover { text-decoration: underline; }
 .domain-table .table-status {

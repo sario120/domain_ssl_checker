@@ -18,13 +18,13 @@ _STATUS_COLORS = {
 def send_webhook_alerts(domain_name, status, ssl_days_left, domain_days_left, settings, domain_data=None):
     errors = []
     slack_url = settings.get('slack_webhook_url', '')
-    if slack_url:
+    if slack_url and settings.get('slack_enabled'):
         try:
             _send_slack(slack_url, domain_name, status, ssl_days_left, domain_days_left, domain_data)
         except Exception as e:
             errors.append(f"Slack: {e}")
     zulip_url = settings.get('zulip_webhook_url', '')
-    if zulip_url:
+    if zulip_url and settings.get('zulip_enabled'):
         try:
             _send_zulip(zulip_url, domain_name, status, ssl_days_left, domain_days_left, domain_data)
         except Exception as e:

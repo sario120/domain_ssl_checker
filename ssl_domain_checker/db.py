@@ -60,7 +60,6 @@ class _PostgreSQLConnection:
             cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
             cur.execute(f'SET search_path TO "{schema}", public')
         self._raw.commit()
-        self._raw.autocommit = True
 
     def execute(self, sql, params=None):
         sql = sql.replace('?', '%s')
