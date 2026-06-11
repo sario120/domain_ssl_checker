@@ -1398,3 +1398,32 @@ legend { font-weight: 600; font-size: 15px; padding: 0 8px; color: var(--primary
   border-radius: 12px; padding: 2px 8px; font-size: 11px; color: var(--text-muted);
   margin: 2px;
 }
+
+/* ─── Backup view ────────────────────────────────────────────── */
+.backup-db-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 16px; margin-bottom: 16px;
+}
+.backup-db-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+}
+.backup-db-label { font-size: 13px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+.backup-db-body { }
+.backup-meta-row { display: flex; flex-wrap: wrap; gap: 16px; }
+.backup-meta-item { font-size: 13px; color: var(--text-muted); }
+.backup-meta-item strong { color: var(--text); }
+.backup-notes { font-style: italic; color: var(--text-muted); }
+.badge-sqlite { background: #e3f2fd; color: #1565c0; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge-pg { background: #e8f5e9; color: #2e7d32; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge-json { background: #fff3e0; color: #e65100; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+body.dark .badge-sqlite { background: #1a237e; color: #90caf9; }
+body.dark .badge-pg { background: #1b5e20; color: #a5d6a7; }
+body.dark .badge-json { background: #e65100; color: #ffcc80; }
+.backup-create-pane, .backup-upload-pane { margin-bottom: 16px; }
+.backup-create-pane .card, .backup-upload-pane .card, .backup-schedule-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; }
+.backup-create-pane .card-header, .backup-upload-pane .card-header, .backup-schedule-card .card-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+.backup-create-pane .card-header h3, .backup-upload-pane .card-header h3, .backup-schedule-card .card-header h3 { margin: 0; font-size: 15px; }
+.backup-create-pane .card-body, .backup-upload-pane .card-body, .backup-schedule-card .card-body { padding: 16px; }

@@ -19,9 +19,9 @@ from status_utils import ssl_status_from_days, domain_status_from_days, compute_
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.environ.get(
-    "DB_PATH",
-    os.path.join(PROJECT_ROOT, "data_volume", "ssl_checker.db")
+_DB_PATH_ENV = os.environ.get("DB_PATH", "")
+DB_PATH = os.path.abspath(_DB_PATH_ENV) if _DB_PATH_ENV else os.path.join(
+    PROJECT_ROOT, "data_volume", "ssl_checker.db"
 )
 
 TIMEZONE = os.environ.get("TIMEZONE", "UTC")
@@ -553,7 +553,7 @@ _ALLOWED_SETTINGS_COLS = frozenset({
     'smtp_server', 'smtp_port', 'smtp_email', 'smtp_password', 'smtp_enabled',
     'ssl_alert_threshold', 'domain_alert_threshold', 'alert_emails',
     'slack_webhook_url', 'slack_enabled', 'zulip_webhook_url', 'zulip_enabled',
-    'email_templates',
+    'email_templates', 'backup_schedule_hour', 'backup_schedule_minute', 'max_backups',
 })
 _ALLOWED_USER_COLS = frozenset({'password', 'role'})
 

@@ -1,0 +1,193 @@
+# Database Optimisation Summary
+
+## 1. Database Connection Pooling (PostgreSQL only)
+
+**File**: `ssl_domain_checker/db.py`
+
+**Before**: Every `get_db()` call outside Flask request context (background threads, scheduler) created a brand-new psycopg2 connection. No reuse between workers.
+
+**After**: `ThreadedConnectionPool` (psycopg2.pool) with min 2, max 10 connections.
+- Pool is created lazily on first connect.
+- `_PostgreSQLConnection.__init__` uses `pool.getconn()` instead of `psycopg2.connect()`.
+- `_PostgreSQLConnection.close()` returns connection to pool via `pool.putconn()`.
+- Pool is global, shared across all threads in the same process.
+- Configurable via env vars `PG_POOL_MIN` (default 2) and `PG_POOL_MAX` (default 10).
+
+Impact: Eliminates connection churn during check-all (20 concurrent workers opening/closing connections on every call to `get_db()`).
+
+---
+
+## 2. New Indexes (SQLite + PostgreSQL)
+
+**File**: `ssl_domain_checker/models.py` — both `_SQLITE_SCHEMA` and `_PG_SCHEMA`
+
+| Index | On Table | Columns | Purpose |
+|-------|----------|---------|---------|
+| `idx_logs_domain_id` | `logs` | `domain_id` | Accelerates LEFT JOIN `logs` ↔ `domains` in `get_logs()` / `get_logs_count()` / `get_logs_summary()` |
+| `idx_domains_last_checked` | `domains` | `last_checked` | Used by scheduler to find domains due for re-check |
+| `idx_domains_created_at` | `domains` | `created_at` | Ordering domains by creation date in UI |
+| `idx_check_runs_started` | `check_runs` | `started_at` | Stale-run detection query (`SELECT ... ORDER BY id DESC LIMIT 1` + status filter) |
+| `idx_check_runs_status` | `check_runs` | `status` | Filter running/completed check runs |
+| `idx_rate_limits_window` | `rate_limits` | `window_start` | Rate-limit window cleanup queries |
+| `idx_check_results_domain` | `check_results` | `domain_id, checked_at DESC` | History browsing per domain |
+
+All use `CREATE INDEX IF NOT EXISTS` — safe for existing installations.
+
+---
+
+## 3. Batch Database Writes
+
+**File**: `ssl_domain_checker/models.py`
+
+### `save_domain_checks_batch(results)`
+- Replaces N individual `save_domain_check()` calls with one `executemany()` call.
+- Single transaction for all domain updates.
+- Used by `check_all` and `check_all_background` routes.
+
+**Before (check-all flow)**: For 100 domains → 100 UPDATE + 100 COMMIT = 200 round-trips.
+**After**: 1 `executemany` + 1 COMMIT = 2 round-trips.
+
+### `add_logs_batch(entries)`
+- Replaces N individual `add_log()` calls with one `executemany()`.
+- Used by `check_all` and `check_all_background`.
+
+### `save_check_results_batch(results)`
+- Batch INSERT into the new `check_results` history table.
+- Same transaction as domain check save.
+
+### Impact on check-all flow
+Before (per domain):
+1. `check_domain()` — network I/O
+2. `save_domain_check()` — 1 UPDATE + COMMIT
+3. `add_log()` — 1 INSERT + COMMIT
+4. `update_check_run()` — 1 UPDATE + COMMIT
+→ 3 DB writes per domain = 300 writes for 100 domains
+
+After (per check-all):
+1. All domains check in parallel (network I/O)
+2. `save_domain_checks_batch()` — 1 `executemany` + 1 COMMIT
+3. `save_check_results_batch()` — 1 `executemany` + 1 COMMIT
+4. `add_logs_batch()` — 1 `executemany` + 1 COMMIT
+5. `update_check_run()` — 1 UPDATE + COMMIT
+→ 4 DB writes total regardless of domain count
+
+### `run_check_for_domain()` refactor
+No longer performs any DB writes — returns raw result dict instead. Batch caller is responsible for persistence.
+
+---
+
+## 4. Check Result History Table
+
+**File**: `ssl_domain_checker/models.py`
+
+### New table: `check_results`
+```sql
+-- SQLite
+CREATE TABLE IF NOT EXISTS check_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+    checked_at TEXT NOT NULL,
+    status TEXT,
+    result_json TEXT,           -- Full JSON of check result
+    ssl_days_left INTEGER,
+    domain_days_left INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_check_results_domain
+    ON check_results(domain_id, checked_at DESC);
+
+-- PostgreSQL (uses JSONB instead of TEXT)
+CREATE TABLE IF NOT EXISTS check_results (
+    id BIGSERIAL PRIMARY KEY,
+    domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+    checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    status TEXT,
+    result_json JSONB,          -- Full check result as JSONB
+    ssl_days_left INTEGER,
+    domain_days_left INTEGER
+);
+```
+
+- Every check-all run appends a row per domain (append-only, never overwrites).
+- `result_json` stores full check output for historical analysis.
+- Indexed on `(domain_id, checked_at DESC)` for fast "latest N results for domain X" queries.
+- PostgreSQL uses JSONB — queryable with `->>` operators.
+- History is pruned by `cleanup_old_data()`.
+
+---
+
+## 5. PostgreSQL JSONB Enhancements
+
+**File**: `ssl_domain_checker/models.py` — `_PG_SCHEMA`
+
+- `check_results.result_json` uses `JSONB` type (PostgreSQL only) instead of TEXT.
+- `domains` table gets optional `check_details JSONB` column via `ALTER TABLE ADD COLUMN IF NOT EXISTS`.
+- SQLite uses TEXT for the same fields (backwards compatible).
+
+---
+
+## 6. History Cleanup
+
+**File**: `ssl_domain_checker/models.py`
+
+### `cleanup_old_data(retention_days=90)`
+Deletes three categories of old data in a single transaction:
+1. `check_results` — rows where `checked_at < cutoff`
+2. `logs` — rows where `created_at < cutoff`
+3. `check_runs` — completed runs where `completed_at < cutoff`
+
+Returns the total count of deleted rows.
+
+**File**: `ssl_domain_checker/scheduler.py`
+
+Cleanup is scheduled daily at 04:00 via APScheduler `CronTrigger`:
+```python
+scheduler.add_job(
+    cleanup_old_data,
+    CronTrigger(hour=4, minute=0),
+    args=[retention_days],
+    id='cleanup_old_data',
+    name='Cleanup old check history and logs',
+)
+```
+
+- Configurable via `DATA_RETENTION_DAYS` env var (default 90).
+- Uses `coalesce=True` — if the job is missed (e.g. server was down at 4 AM), it runs once on next trigger.
+
+---
+
+## 7. Scheduler Optimizations
+
+**File**: `ssl_domain_checker/scheduler.py`
+
+- All existing settings unchanged: `coalesce=True`, `max_instances=1`, `misfire_grace_time=300`.
+- Solitary lock via `fcntl.flock` unchanged.
+- New: daily cleanup job added at 04:00 alongside the check-all interval job.
+
+---
+
+## 8. New Environment Variables
+
+Added to `.env.sample`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PG_POOL_MIN` | `2` | Minimum PostgreSQL connection pool size |
+| `PG_POOL_MAX` | `10` | Maximum PostgreSQL connection pool size |
+| `DATA_RETENTION_DAYS` | `90` | Days to keep check history and logs before cleanup |
+
+---
+
+## Files Modified
+
+| File | Changes |
+|------|---------|
+| `ssl_domain_checker/db.py` | `ThreadedConnectionPool`, `executemany()` on PG wrapper, pool lifecycle |
+| `ssl_domain_checker/models.py` | 7 new indexes, `check_results` table (SQLite + PG), `check_details JSONB` on PG, `save_domain_checks_batch()`, `add_logs_batch()`, `save_check_result_history()`, `save_check_results_batch()`, `cleanup_old_data()`, +json import |
+| `ssl_domain_checker/app.py` | `run_check_for_domain()` returns raw result (no DB writes), check-all flows use batch writes, alert sending moved to callers, manual check saves history |
+| `ssl_domain_checker/scheduler.py` | Daily cleanup job via `CronTrigger`, import `CronTrigger` |
+| `.env.sample` | Added `PG_POOL_MIN`, `PG_POOL_MAX`, `DATA_RETENTION_DAYS` |
+
+## Test Status
+
+All 49 existing tests pass unchanged.
+No regressions in SQLite (default) path — all optimisations are backwards compatible.

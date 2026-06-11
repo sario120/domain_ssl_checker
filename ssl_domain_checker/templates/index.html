@@ -15,6 +15,7 @@
       <button class="nav-tab active" data-view="dashboard">Dashboard</button>
       <button class="nav-tab" data-view="domains">Domains</button>
       <button class="nav-tab" data-view="sslcerts">SSL Certs</button>
+      <button class="nav-tab" data-view="backups">Backups</button>
       <button class="nav-tab" data-view="settings">Settings</button>
       <button class="nav-tab" data-view="logs">Logs</button>
     </div>
@@ -669,6 +670,99 @@
         <span class="unsaved-indicator" id="unsaved-indicator" style="display:none">Unsaved changes</span>
       </div>
       <div id="settings-message" class="form-message"></div>
+    </section>
+
+    <!-- Backups View -->
+    <section id="view-backups" class="view">
+      <div class="view-header">
+        <div>
+          <h2>Backup &amp; Restore</h2>
+          <p class="view-subtitle">Create, download, restore, and manage database snapshots.</p>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-secondary" data-action="refresh-backups-view">Refresh</button>
+          <button class="btn btn-primary" data-action="create-backup-view">Create Backup</button>
+        </div>
+      </div>
+
+      <!-- DB Info Card -->
+      <div class="backup-db-info" id="backup-db-info"></div>
+
+      <!-- Create Backup Modal (inline) -->
+      <div class="backup-create-pane" id="backup-create-pane" style="display:none">
+        <div class="card">
+          <div class="card-header">
+            <h3>Create New Backup</h3>
+            <button class="btn btn-sm btn-secondary" data-action="close-backup-create">Cancel</button>
+          </div>
+          <div class="card-body">
+            <div class="form-row">
+              <label for="backup-notes-input">Notes (optional)</label>
+              <input type="text" id="backup-notes-input" placeholder="e.g. Before upgrading, Weekly backup..." maxlength="200">
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary" data-action="confirm-create-backup">Create Backup</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Upload Backup -->
+      <div class="backup-upload-pane" id="backup-upload-pane" style="display:none">
+        <div class="card">
+          <div class="card-header">
+            <h3>Upload &amp; Restore Backup</h3>
+            <button class="btn btn-sm btn-secondary" data-action="close-backup-upload">Cancel</button>
+          </div>
+          <div class="card-body">
+            <p class="pane-note">Upload a previously downloaded backup file (.db.gz, .sql.gz, .json.gz) to restore it.</p>
+            <div class="form-row">
+              <label for="backup-upload-input">Backup File</label>
+              <input type="file" id="backup-upload-input" accept=".gz,.db,.sql,.json">
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary" data-action="confirm-upload-backup">Upload &amp; Restore</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Backup Scheduler Config -->
+      <div class="backup-schedule-card card" id="backup-schedule-card" style="display:none">
+        <div class="card-header">
+          <h3>Schedule Configuration</h3>
+          <button class="btn btn-sm btn-secondary" data-action="close-backup-schedule">Close</button>
+        </div>
+        <div class="card-body">
+          <div class="form-row">
+            <label for="backup-schedule-hour">Hour (UTC)</label>
+            <input type="number" id="backup-schedule-hour" min="0" max="23" value="3">
+          </div>
+          <div class="form-row">
+            <label for="backup-schedule-minute">Minute</label>
+            <input type="number" id="backup-schedule-minute" min="0" max="59" value="0">
+          </div>
+          <div class="form-row">
+            <label for="backup-max-retention">Max Backups Retained</label>
+            <input type="number" id="backup-max-retention" min="1" max="365" value="30">
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" data-action="save-backup-schedule">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Backup list header actions -->
+      <div class="backup-list-actions" style="display:flex;justify-content:space-between;align-items:center;margin:12px 0;flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-sm btn-secondary" data-action="open-backup-create">+ New Backup</button>
+          <button class="btn btn-sm btn-secondary" data-action="open-backup-upload">Upload &amp; Restore</button>
+          <button class="btn btn-sm btn-secondary" data-action="toggle-backup-schedule">Schedule</button>
+        </div>
+        <span class="backup-count" id="backup-count-label"></span>
+      </div>
+
+      <div class="backups-list" id="backups-view-list"></div>
     </section>
 
     <!-- Logs View -->

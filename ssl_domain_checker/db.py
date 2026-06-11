@@ -1,7 +1,11 @@
+import gc
 import logging
 import os
 import re
 import threading
+import time
+
+import sqlite3
 
 from flask import g
 
@@ -122,15 +126,23 @@ def connect():
             logger.error("PostgreSQL connection failed: %s", e)
             raise
     else:
-        import sqlite3
         from models import DB_PATH
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        conn = sqlite3.connect(DB_PATH, isolation_level='')
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=5000")
-        return conn
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                conn = sqlite3.connect(DB_PATH, isolation_level='')
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.execute("PRAGMA busy_timeout=5000")
+                return conn
+            except sqlite3.OperationalError:
+                if attempt < max_retries - 1:
+                    logger.warning("SQLite connect attempt %d failed, retrying...", attempt + 1)
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                raise
 
 
 def get_db():
@@ -157,6 +169,18 @@ def close_db(e=None):
         except Exception:
             pass
         _tls.db = None
+
+
+def flush_connections():
+    """Close every open sqlite3.Connection in this process.
+    Safe to call before DB overwrite — all connections become stale."""
+    close_db()
+    for obj in gc.get_objects():
+        if isinstance(obj, sqlite3.Connection):
+            try:
+                obj.close()
+            except Exception:
+                pass
 
 
 # ─── Introspection helpers ────────────────────────────────────
@@ -229,7 +253,6 @@ def is_integrity_error(e):
         from psycopg2.errors import UniqueViolation
         return isinstance(e, UniqueViolation)
     else:
-        import sqlite3
         return isinstance(e, sqlite3.IntegrityError)
 
 

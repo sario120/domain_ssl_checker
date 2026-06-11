@@ -53,7 +53,7 @@ function animateCount(el, target, duration) {
 
 // ─── Navigation (hash-based routing) ──────────────────────────
 function activateView(viewName) {
-  if (_userRole !== 'admin' && (viewName === 'settings' || viewName === 'logs')) {
+  if (_userRole !== 'admin' && (viewName === 'settings' || viewName === 'logs' || viewName === 'backups')) {
     viewName = 'dashboard';
     window.location.hash = 'dashboard';
   }
@@ -67,6 +67,7 @@ function activateView(viewName) {
   if (viewName === 'dashboard') loadDashboard();
   if (viewName === 'logs') refreshLogs();
   if (viewName === 'settings') loadSettings();
+  if (viewName === 'backups') loadBackupsView();
   if (viewName === 'domains') loadDomains('full', true);
   if (viewName === 'sslcerts') loadDomains('ssl_only', true);
 }
@@ -164,6 +165,16 @@ document.addEventListener('click', (e) => {
   else if (action === 'bulk-revoke-apikeys') { bulkRevokeApiKeys(); }
   else if (action === 'refresh-api-keys') { loadApiKeys(true); }
   else if (action === 'refresh-backups') { loadBackups(true); }
+  else if (action === 'refresh-backups-view') { loadBackupsView(); }
+  else if (action === 'create-backup-view' || action === 'open-backup-create') { document.getElementById('backup-create-pane').style.display = ''; document.getElementById('backup-notes-input').value = ''; }
+  else if (action === 'close-backup-create') { document.getElementById('backup-create-pane').style.display = 'none'; }
+  else if (action === 'confirm-create-backup') { createBackupWithNotes(); }
+  else if (action === 'open-backup-upload') { document.getElementById('backup-upload-pane').style.display = ''; document.getElementById('backup-upload-input').value = ''; }
+  else if (action === 'close-backup-upload') { document.getElementById('backup-upload-pane').style.display = 'none'; }
+  else if (action === 'confirm-upload-backup') { uploadAndRestoreBackup(); }
+  else if (action === 'toggle-backup-schedule') { const c = document.getElementById('backup-schedule-card'); c.style.display = c.style.display === 'none' ? '' : 'none'; }
+  else if (action === 'close-backup-schedule') { document.getElementById('backup-schedule-card').style.display = 'none'; }
+  else if (action === 'save-backup-schedule') { saveBackupSchedule(); }
   else if (action === 'refresh-email-templates') { loadEmailTemplates(true); }
   else if (action === 'toggle-quickadd') { openQuickAddModal(); }
   else if (action === 'close-quickadd-modal') { closeQuickAddModal(); }
@@ -2712,6 +2723,138 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// ─── Backup dedicated view ────────────────────────────────────
+function loadBackupsView() {
+  loadBackupDbInfo();
+  loadBackupsViewList();
+}
+
+function loadBackupDbInfo() {
+  const container = document.getElementById('backup-db-info');
+  if (!container) return;
+  container.innerHTML = '<div class="settings-list-state">Loading database info...</div>';
+  api('GET', '/api/backups/info').then(info => {
+    var typeBadge = info.type === 'postgresql' ? 'PostgreSQL' : 'SQLite';
+    var typeClass = info.type === 'postgresql' ? 'badge-pg' : 'badge-sqlite';
+    var sizeStr = info.size ? formatSize(info.size) : 'N/A';
+    var connInfo = '';
+    if (info.type === 'postgresql') {
+      connInfo = '<span class="backup-meta-item">Host: ' + escHtml(info.host || 'localhost') + '</span>' +
+                 '<span class="backup-meta-item">DB: ' + escHtml(info.db || 'vigil') + '</span>' +
+                 '<span class="backup-meta-item">Schema: ' + escHtml(info.schema || 'vigil') + '</span>';
+    } else {
+      connInfo = '<span class="backup-meta-item">Size: ' + sizeStr + '</span>';
+    }
+    container.innerHTML =
+      '<div class="backup-db-card">' +
+        '<div class="backup-db-header">' +
+          '<span class="backup-db-label">Database</span>' +
+          '<span class="badge ' + typeClass + '">' + typeBadge + '</span>' +
+        '</div>' +
+        '<div class="backup-db-body">' +
+          '<div class="backup-meta-row">' +
+            '<span class="backup-meta-item">Domains: <strong>' + (info.domain_count !== null && info.domain_count !== undefined ? info.domain_count : 'N/A') + '</strong></span>' +
+            '<span class="backup-meta-item">Backups: <strong>' + info.backup_count + '</strong></span>' +
+            '<span class="backup-meta-item">Max Retention: <strong>' + info.max_backups + '</strong></span>' +
+            connInfo +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }).catch(e => {
+    if (container) container.innerHTML = '<div class="settings-list-state error">Failed to load DB info: ' + escHtml(e.message) + '</div>';
+  });
+}
+
+function loadBackupsViewList() {
+  const container = document.getElementById('backups-view-list');
+  if (!container) return;
+  const label = document.getElementById('backup-count-label');
+  container.innerHTML = '<div class="settings-list-state">Loading backups...</div>';
+  api('GET', '/api/backups').then(backups => {
+    if (!container) return;
+    if (backups.length === 0) {
+      container.innerHTML = '<div class="settings-list-state">No backups yet. Create one to get started.</div>';
+      if (label) label.textContent = '0 backups';
+      return;
+    }
+    if (label) label.textContent = backups.length + ' backup' + (backups.length !== 1 ? 's' : '');
+    container.innerHTML = backups.map(b => {
+      var meta = '';
+      var formatBadge = '';
+      var fmt = b.filename ? b.filename.split('.').slice(-2, -1)[0] || '' : '';
+      if (b.filename && b.filename.endsWith('.sql.gz')) formatBadge = '<span class="badge badge-pg">pg_dump</span>';
+      else if (b.filename && b.filename.endsWith('.json.gz')) formatBadge = '<span class="badge badge-json">JSON</span>';
+      else formatBadge = '<span class="badge badge-sqlite">SQLite</span>';
+      if (b.domain_count !== undefined && b.domain_count !== null) {
+        meta += '<span class="backup-meta-item">' + b.domain_count + ' domains</span>';
+      }
+      meta += '<span class="backup-meta-item">' + formatSize(b.size) + '</span>';
+      if (b.notes) {
+        meta += '<span class="backup-meta-item backup-notes">Notes: ' + escHtml(b.notes) + '</span>';
+      }
+      return '<div class="backup-card">' +
+        '<div class="backup-info">' +
+          '<div class="backup-name">' + formatBadge + ' ' + escHtml(b.filename) + '</div>' +
+          '<div class="backup-meta">' + meta + ' · Created: ' + formatDate(b.created) + '</div>' +
+        '</div>' +
+        '<div class="backup-actions">' +
+          '<button class="btn btn-sm btn-secondary" data-action="download-backup" data-file="' + escHtml(b.filename) + '">Download</button>' +
+          '<button class="btn btn-sm btn-secondary" data-action="restore-backup" data-file="' + escHtml(b.filename) + '">Restore</button>' +
+          '<button class="btn btn-sm btn-danger" data-action="delete-backup" data-file="' + escHtml(b.filename) + '">Delete</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }).catch(e => {
+    if (container) container.innerHTML = '<div class="settings-list-state error">Failed to load backups: ' + escHtml(e.message) + '</div>';
+  });
+}
+
+function createBackupWithNotes() {
+  var notes = document.getElementById('backup-notes-input').value.trim();
+  api('POST', '/api/backups', notes ? { notes: notes } : undefined).then(() => {
+    toast('Backup created');
+    document.getElementById('backup-create-pane').style.display = 'none';
+    loadBackupsViewList();
+    loadBackupDbInfo();
+  }).catch(e => toast(e.message, 'error'));
+}
+
+function uploadAndRestoreBackup() {
+  var input = document.getElementById('backup-upload-input');
+  if (!input.files || !input.files[0]) { toast('Please select a backup file', 'error'); return; }
+  if (!confirm('Restore database from uploaded file "' + input.files[0].name + '"? This will replace the current database. A pre-restore snapshot will be created.')) return;
+  var formData = new FormData();
+  formData.append('file', input.files[0]);
+  fetch('/api/backups/upload', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': _csrfToken },
+    body: formData
+  }).then(res => {
+    var newToken = res.headers.get('X-CSRF-Token');
+    if (newToken) _csrfToken = newToken;
+    if (res.status === 401) { window.location.href = '/'; throw new Error('Session expired'); }
+    return res.json().then(d => { if (!res.ok) throw new Error(d.error || 'Upload failed'); return d; });
+  }).then(() => {
+    toast('Database restored from uploaded backup. Reloading...');
+    setTimeout(() => window.location.reload(), 1500);
+  }).catch(e => toast(e.message, 'error'));
+}
+
+function saveBackupSchedule() {
+  var hour = parseInt(document.getElementById('backup-schedule-hour').value);
+  var minute = parseInt(document.getElementById('backup-schedule-minute').value);
+  var maxBackups = parseInt(document.getElementById('backup-max-retention').value);
+  if (isNaN(hour) || hour < 0 || hour > 23) { toast('Invalid hour (0-23)', 'error'); return; }
+  if (isNaN(minute) || minute < 0 || minute > 59) { toast('Invalid minute (0-59)', 'error'); return; }
+  if (isNaN(maxBackups) || maxBackups < 1 || maxBackups > 365) { toast('Max backups must be 1-365', 'error'); return; }
+
+  api('PUT', '/api/settings', { backup_schedule_hour: hour, backup_schedule_minute: minute, max_backups: maxBackups }).then(() => {
+    toast('Backup schedule saved. Restart required for schedule change to take effect.');
+    document.getElementById('backup-schedule-card').style.display = 'none';
+    loadBackupDbInfo();
+  }).catch(e => toast(e.message, 'error'));
+}
+
 // API key checkbox → bulk revoke button
 document.addEventListener('change', function (e) {
   if (e.target.classList.contains('api-key-cb')) updateBulkRevokeBtn();
@@ -3398,7 +3541,7 @@ async function checkSession() {
 
 function applyRoleBasedUI() {
   const isViewer = _userRole !== 'admin';
-  document.querySelectorAll('.nav-tab[data-view="settings"], .nav-tab[data-view="logs"]').forEach(tab => {
+  document.querySelectorAll('.nav-tab[data-view="settings"], .nav-tab[data-view="logs"], .nav-tab[data-view="backups"]').forEach(tab => {
     tab.style.display = isViewer ? 'none' : '';
   });
   // Hide mutation buttons on dashboard

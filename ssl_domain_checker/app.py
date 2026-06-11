@@ -1096,15 +1096,44 @@ def list_backups():
     return jsonify(backups)
 
 
+@app.route('/api/backups/info', methods=['GET'])
+@admin_required
+def backups_info():
+    return jsonify(backup.get_db_info())
+
+
 @app.route('/api/backups', methods=['POST'])
 @admin_required
 @csrf_required
 def create_backup():
-    path = backup.create_backup()
+    data = request.get_json(silent=True) or {}
+    notes = data.get('notes', '').strip() or None
+    path = backup.create_backup(notes=notes)
     if path:
         models.add_log('audit', f'Database backup created: {os.path.basename(path)}', username=current_username())
         return jsonify({'message': 'Backup created', 'path': path})
     return api_error('Backup failed', 500)
+
+
+@app.route('/api/backups/upload', methods=['POST'])
+@admin_required
+@csrf_required
+def upload_backup():
+    if 'file' not in request.files:
+        return api_error('No file uploaded')
+    f = request.files['file']
+    if not f.filename:
+        return api_error('Empty filename')
+    try:
+        snapshot = backup.create_backup()
+        if snapshot:
+            logger.info(f"Pre-restore snapshot created: {os.path.basename(snapshot)}")
+        db_mod.flush_connections()
+        final_name = backup.upload_and_restore(f)
+        models.add_log('audit', f'Database restored from uploaded backup: {final_name}', username=current_username())
+        return jsonify({'message': 'Database restored from uploaded backup', 'filename': final_name})
+    except Exception as e:
+        return api_error(f'Upload restore failed: {e}', 500)
 
 
 @app.route('/api/backups/restore', methods=['POST'])
@@ -1119,6 +1148,7 @@ def restore_backup():
         snapshot = backup.create_backup()
         if snapshot:
             logger.info(f"Pre-restore snapshot created: {os.path.basename(snapshot)}")
+        db_mod.flush_connections()
         backup.restore_backup(filename)
         models.add_log('audit', f'Database restored from {filename}', username=current_username())
         return jsonify({'message': 'Database restored'})

@@ -1,0 +1,74 @@
+# Environment
+.env
+.env.*
+!.env.sample
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+venv/
+.venv/
+
+# Database
+data_volume/
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.bkp
+
+# Logs
+*.log
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.orig
+
+# OS
+.DS_Store
+Thumbs.db
+.Directory
+.Trashes
+$RECYCLE.BIN/
+
+# Project specific
+#ssl_checker.service
+docker-compose.yml.bkp
+
+# AI assistant artifacts
+.aider.*
+.cursor*
+.claude*
+.windsurfrules
+
+# Archives
+*.zip
+*.tar.gz
+*.tgz
+
+# Backup artifacts
+backups/
+
+# Docker volumes (bind-mounted, host copies)
+vigil-data/
+vigil-backups/
+
+# pytest
+.pytest_cache/
+*test_output*/

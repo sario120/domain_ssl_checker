@@ -6,6 +6,7 @@ import os
 import shutil
 import glob
 import sqlite3
+import stat
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -36,9 +37,9 @@ BACKUP_DIR = os.environ.get(
     "BACKUP_DIR",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
 )
-DB_PATH = os.environ.get(
-    "DB_PATH",
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data_volume", "ssl_checker.db")
+_DB_PATH_ENV = os.environ.get("DB_PATH", "")
+DB_PATH = os.path.abspath(_DB_PATH_ENV) if _DB_PATH_ENV else os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data_volume", "ssl_checker.db"
 )
 MAX_BACKUPS = int(os.environ.get("MAX_BACKUPS", "30"))
 
@@ -78,7 +79,7 @@ def _list_tables(conn):
         return [r[0] for r in rows]
 
 
-def _export_pg_dump(backup_path):
+def _export_pg_dump(backup_path, notes=None):
     host = os.environ.get('POSTGRES_HOST', 'localhost')
     port = os.environ.get('POSTGRES_PORT', '5432')
     dbname = os.environ.get('POSTGRES_DB', 'vigil')
@@ -97,7 +98,7 @@ def _export_pg_dump(backup_path):
         result = subprocess.run(
             ['pg_dump', '--no-owner', '--no-acl', f'--schema={schema}',
              '-h', host, '-p', port, '-U', user, '-d', dbname],
-            capture_output=True, text=True, env=env, timeout=60
+            capture_output=True, text=True, env=env, timeout=120
         )
         if result.returncode != 0:
             raise RuntimeError(f"pg_dump failed: {result.stderr}")
@@ -120,6 +121,8 @@ def _export_pg_dump(backup_path):
         "domain_count": count,
         "format": "pg_dump",
     }
+    if notes:
+        meta["notes"] = notes
     meta_path = backup_path_out + ".meta"
     with open(meta_path, 'w') as f:
         json.dump(meta, f)
@@ -129,12 +132,26 @@ def _export_pg_dump(backup_path):
     return backup_path_out
 
 
-def _export_pg_json(backup_path):
-    conn = db.connect()
+def _export_pg_json(backup_path, notes=None):
+    import time as _time
+    conn = None
+    for attempt in range(5):
+        try:
+            conn = db.connect()
+            break
+        except Exception as e:
+            if 'connection pool exhausted' in str(e).lower() or 'pool exhausted' in str(e).lower():
+                if attempt < 4:
+                    logger.warning("PG pool exhausted on attempt %d/5, retrying in 2s...", attempt + 1)
+                    _time.sleep(2)
+                    continue
+                raise RuntimeError("PostgreSQL connection pool exhausted — too many concurrent operations. Try again later.")
+            raise
     tables = _list_tables(conn)
     dump = {}
     for table in tables:
         if table not in _ALLOWED_BACKUP_TABLES:
+            conn.close()
             raise ValueError(f"Unexpected table in backup export: {table}")
         rows = conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()
         dump[table] = [dict(r) for r in rows]
@@ -157,6 +174,8 @@ def _export_pg_json(backup_path):
         "domain_count": domain_count,
         "format": "json",
     }
+    if notes:
+        meta["notes"] = notes
     meta_path = backup_path_out + ".meta"
     with open(meta_path, 'w') as f:
         json.dump(meta, f)
@@ -166,15 +185,58 @@ def _export_pg_json(backup_path):
     return backup_path_out
 
 
-def create_backup():
+def get_db_info():
+    info = {
+        'type': db.DB_TYPE,
+        'size': None,
+        'domain_count': None,
+        'backup_count': len(list_backups()),
+        'max_backups': MAX_BACKUPS,
+        'backup_dir': BACKUP_DIR,
+        'schedule_hour': 3,
+        'schedule_minute': 0,
+    }
+    try:
+        conn = db.connect()
+        row = conn.execute("SELECT backup_schedule_hour, backup_schedule_minute, max_backups FROM settings WHERE id=1").fetchone()
+        if row:
+            if row.get('backup_schedule_hour') is not None:
+                info['schedule_hour'] = int(row['backup_schedule_hour'])
+            if row.get('backup_schedule_minute') is not None:
+                info['schedule_minute'] = int(row['backup_schedule_minute'])
+            if row.get('max_backups') is not None:
+                info['max_backups'] = int(row['max_backups'])
+        if db.DB_TYPE == 'postgresql':
+            info['host'] = os.environ.get('POSTGRES_HOST', 'localhost')
+            info['db'] = os.environ.get('POSTGRES_DB', 'vigil')
+            info['schema'] = os.environ.get('POSTGRES_SCHEMA', 'vigil').strip()
+        else:
+            if os.path.exists(DB_PATH):
+                info['size'] = os.path.getsize(DB_PATH)
+        row2 = conn.execute("SELECT COUNT(*) AS cnt FROM domains").fetchone()
+        info['domain_count'] = row2['cnt'] if row2 else None
+        conn.close()
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    return info
+
+
+def create_backup(notes=None):
     ensure_backup_dir()
 
     if db.DB_TYPE == 'postgresql':
         try:
-            return _export_pg_dump(BACKUP_DIR)
+            return _export_pg_dump(BACKUP_DIR, notes=notes)
         except (RuntimeError, FileNotFoundError) as e:
             logger.warning("pg_dump export failed (%s), falling back to JSON export", e)
-            return _export_pg_json(BACKUP_DIR)
+            try:
+                return _export_pg_json(BACKUP_DIR, notes=notes)
+            except RuntimeError as e2:
+                logger.error("JSON fallback backup also failed: %s", e2)
+                raise
 
     if not os.path.exists(DB_PATH):
         logger.warning("Database file not found, skipping backup")
@@ -184,9 +246,21 @@ def create_backup():
     backup_name = f"ssl_checker_{ts}.db.gz"
     backup_path = os.path.join(BACKUP_DIR, backup_name)
 
-    with open(DB_PATH, 'rb') as f_in:
+    # Use backup API to capture a consistent snapshot (handles WAL correctly)
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix='.db')
+    os.close(tmp_fd)
+    src = sqlite3.connect(DB_PATH)
+    dst = sqlite3.connect(tmp_path)
+    try:
+        src.backup(dst)
+    finally:
+        src.close()
+        dst.close()
+
+    with open(tmp_path, 'rb') as f_in:
         with gzip.open(backup_path, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
+    os.unlink(tmp_path)
 
     count = verify_backup(backup_path)
 
@@ -199,6 +273,8 @@ def create_backup():
         "db_size": os.path.getsize(DB_PATH),
         "format": "sqlite",
     }
+    if notes:
+        meta["notes"] = notes
     with open(meta_path, 'w') as f:
         json.dump(meta, f)
 
@@ -302,6 +378,8 @@ def list_backups():
         if meta:
             entry["domain_count"] = meta.get("domain_count")
             entry["db_size"] = meta.get("db_size")
+            entry["notes"] = meta.get("notes")
+            entry["format"] = meta.get("format")
         result.append(entry)
     return result
 
@@ -319,17 +397,23 @@ def restore_backup(filename):
         reader = gzip.open if _is_gz(resolved) else open
 
         if ext == '.sql':
+            host = os.environ.get('POSTGRES_HOST', 'localhost')
+            port = os.environ.get('POSTGRES_PORT', '5432')
+            pg_db = os.environ.get('POSTGRES_DB', 'vigil')
+            user = os.environ.get('POSTGRES_USER', 'vigil')
+            password = os.environ.get('POSTGRES_PASSWORD', '')
+            env = os.environ.copy()
+            env['PGPASSWORD'] = password
             with reader(resolved, 'rt', encoding='utf-8') as f:
-                sql = f.read()
-            conn = db.connect()
-            try:
-                conn.executescript(sql)
-                conn.commit()
-            except Exception as e:
-                conn.rollback()
-                raise ValueError(f"PostgreSQL restore failed: {e}")
-            finally:
-                conn.close()
+                sql_data = f.read()
+            result = subprocess.run(
+                ['psql', '-h', host, '-p', port, '-U', user, '-d', pg_db, '-f', '-'],
+                input=sql_data, capture_output=True, text=True, env=env, timeout=120
+            )
+            if result.returncode != 0:
+                raise ValueError(f"psql restore failed: {result.stderr[:500]}")
+            logger.info(f"Database restored from {filename}")
+            return True
         elif ext == '.json':
             with reader(resolved, 'rt', encoding='utf-8') as f:
                 data = json.load(f)
@@ -361,19 +445,56 @@ def restore_backup(filename):
         logger.info(f"Database restored from {filename}")
         return True
 
-    conn = sqlite3.connect(resolved)
-    integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
-    conn.close()
-    if integrity != "ok":
-        raise ValueError("Backup file is not a valid SQLite database")
-
+    # SQLite restore — decompress, verify integrity, then use backup API
     reader = gzip.open if _is_gz(resolved) else open
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix='.db')
+    os.close(tmp_fd)
     with reader(resolved, 'rb') as f_in:
-        with open(DB_PATH, 'wb') as f_out:
+        with open(tmp_path, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
 
+    conn = sqlite3.connect(tmp_path)
+    integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+    if integrity != "ok":
+        conn.close()
+        os.unlink(tmp_path)
+        raise ValueError("Backup file is not a valid SQLite database")
+
+    # Use backup API — copies pages transactionally, handles WAL/SHM internally
+    live = sqlite3.connect(DB_PATH, timeout=30)
+    try:
+        conn.backup(live, pages=-1)
+    finally:
+        conn.close()
+        live.close()
+
+    os.unlink(tmp_path)
     logger.info(f"Database restored from {filename}")
     return True
+
+
+def upload_and_restore(file_storage):
+    ensure_backup_dir()
+    original_name = file_storage.filename or 'uploaded_backup.db.gz'
+    dest_path = os.path.join(BACKUP_DIR, f"_upload_{int(datetime.now(timezone.utc).timestamp())}_{original_name}")
+    file_storage.save(dest_path)
+    os.chmod(dest_path, stat.S_IRUSR | stat.S_IWUSR)
+    try:
+        restore_backup(os.path.basename(dest_path))
+        # On success, move to proper backup name
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        final_name = f"ssl_checker_{ts}_{original_name}"
+        final_path = os.path.join(BACKUP_DIR, final_name)
+        os.rename(dest_path, final_path)
+        meta_path = dest_path + ".meta"
+        if os.path.exists(meta_path):
+            os.rename(meta_path, final_path + ".meta")
+        logger.info(f"Uploaded backup restored and saved: {final_name}")
+        return final_name
+    except Exception:
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
+        raise
 
 
 def schedule_backup(scheduler):
