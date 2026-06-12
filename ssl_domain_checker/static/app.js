@@ -916,11 +916,42 @@ function _toUtcIso(dateStr) {
   return dateStr + 'Z';
 }
 
+function _parseDt(str) {
+  var parts = str.split(' ');
+  if (parts.length < 2) return null;
+  var dateParts = parts[0].split('-');
+  var timeParts = parts[1].split(':');
+  if (dateParts.length < 3 || timeParts.length < 2) return null;
+  return {
+    y: parseInt(dateParts[0], 10),
+    m: parseInt(dateParts[1], 10) - 1,
+    d: parseInt(dateParts[2], 10),
+    h: parseInt(timeParts[0], 10),
+    min: parseInt(timeParts[1], 10)
+  };
+}
+
+function _toLocal(utc) {
+  var p = _parseDt(utc);
+  if (!p) return null;
+  var ts = Date.UTC(p.y, p.m, p.d, p.h, p.min) + _timezoneOffsetH * 3600000;
+  var local = new Date(ts);
+  return {
+    month: local.getUTCMonth(),
+    day: local.getUTCDate(),
+    hour: local.getUTCHours(),
+    min: local.getUTCMinutes(),
+    year: local.getUTCFullYear()
+  };
+}
+
 function formatDate(dateStr) {
   if (!dateStr) return '';
-  var d = new Date(_toUtcIso(dateStr));
-  if (isNaN(d.getTime())) return dateStr;
-  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  var p = _toLocal(dateStr);
+  if (!p) return dateStr;
+  var hh = p.hour.toString().padStart(2, '0');
+  var mm = p.min.toString().padStart(2, '0');
+  return (p.month + 1) + '/' + p.day + '/' + p.year + ' ' + hh + ':' + mm;
 }
 
 function relativeTime(dateStr) {
@@ -1176,6 +1207,8 @@ function formatDurationCompact(h, m, d, hr) {
 
 var _detailWebappId = null;
 var _detailChartHours = 24;
+// Timezone offset in hours from UTC (default PKT Pakistan UTC+5)
+var _timezoneOffsetH = 5;
 
 document.getElementById('chart-duration-bar') && document.getElementById('chart-duration-bar').addEventListener('click', function (e) {
   var btn = e.target.closest('[data-hours]');
@@ -1248,22 +1281,8 @@ function loadWebappChart() {
 
     var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-    function parseCheckedAt(str) {
-      var parts = str.split(' ');
-      if (parts.length < 2) return null;
-      var dateParts = parts[0].split('-');
-      var timeParts = parts[1].split(':');
-      if (dateParts.length < 3 || timeParts.length < 2) return null;
-      return {
-        month: parseInt(dateParts[1], 10) - 1,
-        day: parseInt(dateParts[2], 10),
-        hour: parseInt(timeParts[0], 10),
-        min: parseInt(timeParts[1], 10)
-      };
-    }
-
     function fmtAxisLabel(dateStr) {
-      var p = parseCheckedAt(dateStr);
+      var p = _toLocal(dateStr);
       if (!p) return dateStr;
       var mon = months[p.month];
       var hh = p.hour.toString().padStart(2, '0');
@@ -1337,15 +1356,14 @@ function loadWebappChart() {
         hoverLine.style.display = '';
 
         var pt = withRt[idx];
-        var p = parseCheckedAt(pt.checked_at);
+        var localPt = _toLocal(pt.checked_at);
         var timeStr = pt.checked_at;
-        if (p) {
-          var yyyy = pt.checked_at.split(' ')[0].split('-')[0];
-          var monName = ['January','February','March','April','May','June','July','August','September','October','November','December'][p.month];
-          var hh12 = p.hour % 12 || 12;
-          var ampm = p.hour < 12 ? 'AM' : 'PM';
-          var mmS = p.min.toString().padStart(2, '0');
-          timeStr = monName + ' ' + p.day + ', ' + yyyy + ', ' + hh12 + ':' + mmS + ' ' + ampm + ' UTC';
+        if (localPt) {
+          var monName = ['January','February','March','April','May','June','July','August','September','October','November','December'][localPt.month];
+          var hh12 = localPt.hour % 12 || 12;
+          var ampm = localPt.hour < 12 ? 'AM' : 'PM';
+          var mmS = localPt.min.toString().padStart(2, '0');
+          timeStr = monName + ' ' + localPt.day + ', ' + localPt.year + ', ' + hh12 + ':' + mmS + ' ' + ampm + ' PKT';
         }
         tooltip.innerHTML = '<div>' + timeStr + '</div><div style="font-weight:600;color:' + color + '">' + pt.response_time_ms + ' ms</div>';
         tooltip.style.display = '';
