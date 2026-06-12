@@ -395,6 +395,7 @@
           <button class="btn btn-secondary" data-action="toggle-view-webapps" title="Switch to table view"><span class="view-toggle-icon">&#9776;</span><span class="view-toggle-label">Table</span></button>
           <button class="btn btn-secondary" data-action="check-all-webapps">Check All</button>
           <button class="btn btn-secondary" data-action="webapp-export-csv">Export CSV</button>
+          <button class="btn btn-secondary" data-action="import">Import</button>
           <button class="btn btn-primary" data-action="add-webapp">+ Add Web App</button>
         </div>
       </div>
@@ -476,6 +477,7 @@
         <p>No web apps monitored yet.</p>
         <div class="empty-actions">
           <button class="btn btn-primary" data-action="add-webapp">Add your first web app</button>
+          <button class="btn btn-secondary" data-action="download-template-webapp">Download import template</button>
         </div>
       </div>
     </section>
@@ -1081,7 +1083,7 @@
     <div class="modal-backdrop" data-action="close-import-modal"></div>
     <div class="modal-content">
       <div class="modal-header">
-        <h3>Import SSL Domains</h3>
+        <h3 id="import-modal-title">Import</h3>
         <button class="modal-close" data-action="close-import-modal">&times;</button>
       </div>
       <div id="import-form">

@@ -1007,6 +1007,95 @@ def webapp_export_csv():
     return resp
 
 
+@app.route('/api/webapps/import', methods=['POST'])
+@admin_required
+@csrf_required
+def import_webapps():
+    import csv as csv_mod
+    import io
+
+    items = []
+    if request.files:
+        f = request.files.get('file')
+        if f:
+            raw = f.read().decode('utf-8', errors='replace')
+            filename = f.filename or ''
+            if filename.endswith('.csv'):
+                reader = csv_mod.DictReader(io.StringIO(raw))
+                for row in reader:
+                    url = row.get('url', '').strip()
+                    if url:
+                        items.append({
+                            'name': row.get('name', url).strip(),
+                            'url': url,
+                            'method': row.get('method', 'GET'),
+                            'expected_status': int(row['expected_status']) if row.get('expected_status') else 200,
+                            'expected_body': row.get('expected_body', ''),
+                            'timeout': int(row['timeout']) if row.get('timeout') else 10,
+                            'check_interval': int(row['check_interval']) if row.get('check_interval') else 300,
+                            'notes': row.get('notes', ''),
+                        })
+            elif filename.endswith('.txt'):
+                for line in raw.strip().splitlines():
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        items.append({'name': line, 'url': line, 'method': 'GET'})
+            else:
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        items = parsed
+                    elif isinstance(parsed, dict) and 'webapps' in parsed:
+                        items = parsed['webapps']
+                except json.JSONDecodeError:
+                    return api_error('Unsupported file format. Use .json, .csv, or .txt')
+    else:
+        data = request.get_json(silent=True) or {}
+        if isinstance(data, list):
+            items = data
+        elif 'webapps' in data:
+            items = data['webapps']
+        else:
+            return api_error('Send JSON with "webapps" array, or upload a .csv/.txt/.json file')
+
+    results = {'added': 0, 'skipped': 0, 'errors': [], 'added_list': [], 'skipped_list': []}
+    for item in items:
+        url = item.get('url', '').strip() if isinstance(item, dict) else str(item).strip()
+        if not url:
+            continue
+        name = item.get('name', url).strip() if isinstance(item, dict) else url
+        method = item.get('method', 'GET') if isinstance(item, dict) else 'GET'
+        expected_status = int(item.get('expected_status', 200)) if isinstance(item, dict) else 200
+        expected_body = item.get('expected_body') if isinstance(item, dict) else None
+        timeout = int(item.get('timeout', 10)) if isinstance(item, dict) else 10
+        check_interval = int(item.get('check_interval', 300)) if isinstance(item, dict) else 300
+        notes = item.get('notes', '') if isinstance(item, dict) else ''
+        headers = item.get('headers') if isinstance(item, dict) else None
+        body = item.get('body') if isinstance(item, dict) else None
+
+        if headers and isinstance(headers, dict):
+            headers = json.dumps(headers)
+        if expected_body == '':
+            expected_body = None
+        if body == '':
+            body = None
+
+        r = models.add_webapp(
+            name=name, url=url, method=method,
+            expected_status=expected_status, expected_body=expected_body,
+            timeout=timeout, headers=headers, body=body,
+            check_interval=check_interval, notes=notes,
+        )
+        if r.get('ok'):
+            results['added'] += 1
+            results['added_list'].append(name)
+        else:
+            results['errors'].append(f'{name} ({url}): {r.get("error")}')
+
+    logger.info(f"Webapp import: {results['added']} added, {results['skipped']} skipped, {len(results['errors'])} errors")
+    return jsonify(results)
+
+
 @app.route('/api/webapps/status/public', methods=['GET'])
 def webapp_public_status():
     apps = models.get_webapps()

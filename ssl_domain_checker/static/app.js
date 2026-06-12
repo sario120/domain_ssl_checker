@@ -135,6 +135,7 @@ document.addEventListener('click', (e) => {
   else if (action === 'clear-domain-filters') clearDomainFilters(btn.dataset.type);
   else if (action === 'download-template') downloadTemplate('full');
   else if (action === 'download-template-ssl') downloadTemplate('ssl_only');
+  else if (action === 'download-template-webapp') downloadTemplate('webapp');
   else if (action === 'submit-bulk-notes') submitBulkNotes();
   else if (action === 'close-bulk-notes') closeBulkNotes();
   else if (action === 'toggle-columns-full') toggleColumnDropdown('full');
@@ -2335,35 +2336,51 @@ function clearDomainFilters(type) {
 }
 
 function downloadTemplate(type) {
-  const picker = document.createElement('div');
+  var picker = document.createElement('div');
   picker.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:20px;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:8px;min-width:180px;';
   picker.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">Download template as…</div>' +
     '<button class="btn btn-primary" style="width:100%;">CSV</button>' +
     '<button class="btn btn-secondary" style="width:100%;">JSON</button>';
   document.body.appendChild(picker);
-  picker.querySelectorAll('button').forEach((btn, i) => {
-    btn.addEventListener('click', () => {
+  var btns = picker.querySelectorAll('button');
+  btns.forEach(function (btn, i) {
+    btn.addEventListener('click', function () {
       picker.remove();
-      if (i === 0) {
-        const csv = type === 'ssl_only'
-          ? 'url,type,notes\nexample.com,ssl_only,\n'
-          : 'url,type,notes,manual_registrar,manual_expiry_date\nexample.com,full,,GoDaddy,2027-01-01\n';
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const a = document.createElement('a');
+      if (type === 'webapp') {
+        var csvContent = 'name,url,method,expected_status,expected_body,timeout,check_interval,notes\nMy API,https://api.example.com/health,GET,200,,10,300,\n';
+        var jsonContent = '[{"name":"My API","url":"https://api.example.com/health","method":"GET","expected_status":200,"check_interval":300}]';
+        var content = i === 0 ? csvContent : jsonContent;
+        var ext = i === 0 ? 'csv' : 'json';
+        var mime = i === 0 ? 'text/csv' : 'application/json';
+        var blob = new Blob([content], { type: mime });
+        var a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = `import-template-${type}.csv`;
+        a.download = 'import-template-webapp.' + ext;
         a.click();
         URL.revokeObjectURL(a.href);
       } else {
-        const template = type === 'ssl_only'
-          ? '[{"url": "example.com", "type": "ssl_only", "notes": ""}]'
-          : '[{"url": "example.com", "type": "full", "manual_registrar": "GoDaddy", "manual_expiry_date": "2027-01-01", "notes": ""}]';
-        const blob = new Blob([template], { type: 'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `import-template-${type}.json`;
-        a.click();
-        URL.revokeObjectURL(a.href);
+        var csv, template;
+        if (i === 0) {
+          csv = type === 'ssl_only'
+            ? 'url,type,notes\nexample.com,ssl_only,\n'
+            : 'url,type,notes,manual_registrar,manual_expiry_date\nexample.com,full,,GoDaddy,2027-01-01\n';
+          var blob = new Blob([csv], { type: 'text/csv' });
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'import-template-' + type + '.csv';
+          a.click();
+          URL.revokeObjectURL(a.href);
+        } else {
+          template = type === 'ssl_only'
+            ? '[{"url": "example.com", "type": "ssl_only", "notes": ""}]'
+            : '[{"url": "example.com", "type": "full", "manual_registrar": "GoDaddy", "manual_expiry_date": "2027-01-01", "notes": ""}]';
+          var blob = new Blob([template], { type: 'application/json' });
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'import-template-' + type + '.json';
+          a.click();
+          URL.revokeObjectURL(a.href);
+        }
       }
       toast('Template downloaded');
     });
@@ -3889,8 +3906,13 @@ function exportDomains() {
 }
 
 function importDomains() {
-  const type = activeView === 'sslcerts' ? 'ssl_only' : 'full';
+  var isWebapp = activeView === 'webapps';
+  var type = isWebapp ? 'webapp' : (activeView === 'sslcerts' ? 'ssl_only' : 'full');
   document.getElementById('import-modal').dataset.importType = type;
+  document.getElementById('import-modal-title').textContent = isWebapp ? 'Import Web Apps' : 'Import SSL Domains';
+  document.getElementById('import-json').placeholder = isWebapp
+    ? 'Paste JSON or one URL per line (e.g. https://api.example.com/health)'
+    : "Paste JSON or one domain per line (e.g. example.com)";
   resetImportModal();
   document.getElementById('import-modal').classList.add('open');
 }
@@ -3901,20 +3923,23 @@ function closeImportModal() {
 }
 
 function doImport() {
-  const fileInput = document.getElementById('import-file');
-  const file = fileInput.files[0];
+  var importType = document.getElementById('import-modal').dataset.importType || 'full';
+  var isWebapp = importType === 'webapp';
+  var endpoint = isWebapp ? '/api/webapps/import' : '/api/domains/import';
+
+  var fileInput = document.getElementById('import-file');
+  var file = fileInput.files[0];
 
   if (file) {
-    const importType = document.getElementById('import-modal').dataset.importType || 'full';
-    const reader = new FileReader();
+    var reader = new FileReader();
     reader.onload = function (e) {
-      const fd = new FormData();
+      var fd = new FormData();
       fd.append('file', file);
-      fetch('/api/domains/import?type=' + importType, {
+      fetch(endpoint, {
         method: 'POST',
         headers: { 'X-CSRF-Token': _csrfToken },
         body: fd,
-      }).then(r => r.json()).then(handleImportResult).catch(err => {
+      }).then(function (r) { return r.json(); }).then(handleImportResult).catch(function (err) {
         document.getElementById('import-result').textContent = err.message;
         document.getElementById('import-result').className = 'form-message error';
       });
@@ -3923,26 +3948,24 @@ function doImport() {
     return;
   }
 
-  const text = document.getElementById('import-json').value.trim();
-  if (!text) { document.getElementById('import-result').textContent = 'Paste JSON, one domain per line, or upload a file'; document.getElementById('import-result').className = 'form-message error'; return; }
+  var text = document.getElementById('import-json').value.trim();
+  if (!text) { document.getElementById('import-result').textContent = 'Paste JSON, one URL per line, or upload a file'; document.getElementById('import-result').className = 'form-message error'; return; }
 
-  const importType = document.getElementById('import-modal').dataset.importType || 'full';
-  let domains;
+  var items;
   try {
-    domains = JSON.parse(text);
+    items = JSON.parse(text);
   } catch (e) {
-    // Not JSON — treat as one domain per line
-    domains = text.split('\n').map(line => {
+    items = text.split('\n').map(function (line) {
       line = line.trim();
-      return line && !line.startsWith('#') ? {url: line, type: importType, notes: ''} : null;
+      return line && !line.startsWith('#') ? {url: line, name: line} : null;
     }).filter(Boolean);
-    if (!domains.length) {
-      document.getElementById('import-result').textContent = 'No valid domains found';
+    if (!items.length) {
+      document.getElementById('import-result').textContent = 'No valid entries found';
       document.getElementById('import-result').className = 'form-message error';
       return;
     }
   }
-  api('POST', '/api/domains/import', { domains }).then(handleImportResult).catch(e => {
+  api('POST', endpoint, isWebapp ? { webapps: items } : { domains: items }).then(handleImportResult).catch(function (e) {
     document.getElementById('import-result').textContent = e.message;
     document.getElementById('import-result').className = 'form-message error';
   });
@@ -3982,7 +4005,8 @@ function handleImportResult(result) {
   detailsContainer.style.display = 'block';
 
   toast('Import complete');
-  if (activeView === 'domains') loadDomains('full');
+  if (activeView === 'webapps') loadWebApps(true);
+  else if (activeView === 'domains') loadDomains('full');
   else if (activeView === 'sslcerts') loadDomains('ssl_only');
 }
 
@@ -4213,8 +4237,12 @@ function applyRoleBasedUI() {
   document.querySelectorAll('#view-sslcerts [data-action="export"], #view-sslcerts [data-action="import"], #view-sslcerts [data-action="check-all-ssl"], #view-sslcerts [data-action="add-domain-ssl"], #view-sslcerts [data-action="download-template-ssl"]').forEach(btn => {
     btn.style.display = isViewer ? 'none' : '';
   });
+  // Hide mutation buttons on webapps view
+  document.querySelectorAll('#view-webapps [data-action="import"], #view-webapps [data-action="check-all-webapps"], #view-webapps [data-action="add-webapp"], #view-webapps [data-action="download-template-webapp"], #view-webapps [data-action="webapp-export-csv"]').forEach(btn => {
+    btn.style.display = isViewer ? 'none' : '';
+  });
   // Hide bulk toolbars entirely for viewers (no actionable bulk ops)
-  document.querySelectorAll('#bulk-toolbar, #ssl-bulk-toolbar').forEach(el => {
+  document.querySelectorAll('#bulk-toolbar, #ssl-bulk-toolbar, #webapp-bulk-toolbar').forEach(el => {
     el.style.display = isViewer ? 'none' : '';
   });
 }
