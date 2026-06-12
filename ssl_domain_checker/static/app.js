@@ -1207,24 +1207,79 @@ function loadWebappChart() {
     document.getElementById('detail-wa-max-rt').textContent = Math.max.apply(null, rts) + 'ms';
     document.getElementById('detail-wa-last-rt').textContent = rts[rts.length - 1] + 'ms';
 
-    var w = chartEl.offsetWidth || 500;
-    var h = 120;
-    var pad = 4;
+    var totalW = chartEl.offsetWidth || 500;
+    var margin = { top: 4, right: 4, bottom: 22, left: 44 };
+    var w = totalW - margin.left - margin.right;
+    var h = 116;
     var max = Math.max.apply(null, rts);
     var min = Math.min.apply(null, rts);
+    if (min === max) { min = 0; }
     var range = max - min || 1;
     var color = getComputedStyle(document.body).getPropertyValue('--primary').trim() || '#3b82f6';
     var areaColor = color + '22';
+    var muted = getComputedStyle(document.body).getPropertyValue('--text-muted').trim() || '#888';
+    var borderColor = getComputedStyle(document.body).getPropertyValue('--border').trim() || '#ddd';
+
     var pts = rts.map(function (v, i) {
-      var x = (i / (rts.length - 1)) * (w - pad * 2) + pad;
-      var y = h - ((v - min) / range) * (h - pad * 2) - pad;
+      var x = (i / (rts.length - 1)) * w;
+      var y = h - ((v - min) / range) * h;
       return x + ',' + y;
     }).join(' ');
-    var areaPts = pad + ',' + (h - pad) + ' ' + pts + ' ' + (w - pad) + ',' + (h - pad);
-    chartEl.innerHTML = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" style="display:block;width:100%;height:120px">' +
-      '<polygon fill="' + areaColor + '" points="' + areaPts + '"/>' +
-      '<polyline fill="none" stroke="' + color + '" stroke-width="2" points="' + pts + '"/>' +
-      '</svg>';
+    var areaPts = '0,' + h + ' ' + pts + ' ' + w + ',' + h;
+
+    function niceMax(val) {
+      var mag = Math.pow(10, Math.floor(Math.log10(val)));
+      var norm = val / mag;
+      if (norm <= 1) return mag;
+      if (norm <= 2) return 2 * mag;
+      if (norm <= 5) return 5 * mag;
+      return 10 * mag;
+    }
+    var yMax = niceMax(max);
+    var yTicks = [];
+    var tickStep = yMax / 4;
+    for (var i = 0; i <= 4; i++) {
+      yTicks.push(Math.round(i * tickStep));
+    }
+
+    function fmtTime(dateStr) {
+      var d = new Date(_toUtcIso(dateStr));
+      if (isNaN(d.getTime())) return dateStr;
+      var hours = _detailChartHours;
+      if (hours <= 24) return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+      if (hours <= 168) return d.getMonth() + 1 + '/' + d.getDate() + ' ' + d.getHours().toString().padStart(2, '0') + ':00';
+      return d.getMonth() + 1 + '/' + d.getDate();
+    }
+
+    var xLabels = [];
+    var labelCount = Math.min(6, withRt.length);
+    for (var i = 0; i < labelCount; i++) {
+      var idx = Math.round((i / (labelCount - 1)) * (withRt.length - 1));
+      xLabels.push({ idx: idx, label: fmtTime(withRt[idx].checked_at) });
+    }
+
+    var svg = '';
+    svg += '<svg width="' + totalW + '" height="' + (h + margin.bottom) + '" viewBox="0 0 ' + totalW + ' ' + (h + margin.bottom) + '" style="display:block;width:100%;height:' + (h + margin.bottom) + 'px">';
+
+    svg += '<g transform="translate(' + margin.left + ',0)">';
+
+    for (var i = 0; i < yTicks.length; i++) {
+      var yVal = yTicks[i];
+      var yPos = h - (yVal / yMax) * h;
+      svg += '<line x1="0" y1="' + yPos + '" x2="' + w + '" y2="' + yPos + '" stroke="' + borderColor + '" stroke-width="0.5"/>';
+      svg += '<text x="-6" y="' + (yPos + 3) + '" fill="' + muted + '" font-size="10" text-anchor="end">' + yVal + '</text>';
+    }
+
+    svg += '<polygon fill="' + areaColor + '" points="' + areaPts + '"/>';
+    svg += '<polyline fill="none" stroke="' + color + '" stroke-width="2" points="' + pts + '"/>';
+
+    for (var i = 0; i < xLabels.length; i++) {
+      var xPos = (xLabels[i].idx / (withRt.length - 1)) * w;
+      svg += '<text x="' + xPos + '" y="' + (h + 16) + '" fill="' + muted + '" font-size="9" text-anchor="' + (i === 0 ? 'start' : i === xLabels.length - 1 ? 'end' : 'middle') + '">' + xLabels[i].label + '</text>';
+    }
+
+    svg += '</g></svg>';
+    chartEl.innerHTML = svg;
   }).catch(function () { chartEl.innerHTML = '<span class="text-muted">Failed to load</span>'; });
 }
 
