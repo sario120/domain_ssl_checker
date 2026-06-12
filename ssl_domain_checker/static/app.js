@@ -1246,7 +1246,21 @@ function loadWebappChart() {
       yTicks.push(Math.round(i * tickStep));
     }
 
-    var minLabelSpacing = 65;
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    function fmtAxisLabel(dateStr) {
+      var d = new Date(_toUtcIso(dateStr));
+      if (isNaN(d.getTime())) return dateStr;
+      var mon = months[d.getMonth()];
+      var day = d.getDate();
+      var hh = d.getHours().toString().padStart(2, '0');
+      var mm = d.getMinutes().toString().padStart(2, '0');
+      if (_detailChartHours <= 24) return mon + ' ' + day + ', ' + hh + ':' + mm;
+      if (_detailChartHours <= 168) return mon + ' ' + day + ', ' + hh + ':00';
+      return mon + ' ' + day;
+    }
+
+    var minLabelSpacing = 70;
     var xLabels = [];
     var maxLabels = Math.max(2, Math.floor(w / minLabelSpacing));
     var labelCount = Math.min(maxLabels, withRt.length);
@@ -1256,7 +1270,8 @@ function loadWebappChart() {
     }
 
     var svg = '';
-    svg += '<svg width="' + totalW + '" height="' + (h + margin.bottom) + '" viewBox="0 0 ' + totalW + ' ' + (h + margin.bottom) + '" style="display:block;width:100%;height:' + (h + margin.bottom) + 'px">';
+    svg += '<svg id="chart-svg" width="' + totalW + '" height="' + (h + margin.bottom) + '" viewBox="0 0 ' + totalW + ' ' + (h + margin.bottom) + '" style="display:block;width:100%;height:' + (h + margin.bottom) + 'px">';
+    svg += '<defs><clipPath id="chart-clip"><rect x="0" y="0" width="' + w + '" height="' + h + '"/></clipPath></defs>';
     svg += '<g transform="translate(' + margin.left + ',0)">';
 
     for (var i = 0; i < yTicks.length; i++) {
@@ -1266,33 +1281,71 @@ function loadWebappChart() {
       svg += '<text x="-6" y="' + (yPos + 3) + '" fill="' + muted + '" font-size="9" text-anchor="end">' + yVal + '</text>';
     }
 
+    svg += '<g clip-path="url(#chart-clip)">';
     svg += '<polygon fill="' + areaColor + '" points="' + areaPts + '"/>';
     svg += '<polyline fill="none" stroke="' + color + '" stroke-width="2" points="' + pts + '"/>';
+    svg += '<rect class="chart-hover-overlay" x="0" y="0" width="' + w + '" height="' + h + '" fill="transparent" style="cursor:crosshair"/>';
+    svg += '<line class="chart-hover-line" x1="0" y1="0" x2="0" y2="' + h + '" stroke="' + color + '" stroke-width="1" stroke-dasharray="3,3" style="display:none"/>';
+    svg += '</g>';
 
     for (var i = 0; i < xLabels.length; i++) {
       var idx = xLabels[i];
       var xPos = (idx / (withRt.length - 1)) * w;
-      var label = '';
-      var d = new Date(_toUtcIso(withRt[idx].checked_at));
-      if (!isNaN(d.getTime())) {
-        var hh = d.getHours().toString().padStart(2, '0');
-        var mm = d.getMinutes().toString().padStart(2, '0');
-        if (_detailChartHours <= 24) {
-          label = hh + ':' + mm;
-        } else if (_detailChartHours <= 168) {
-          label = (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hh + ':00';
-        } else {
-          label = (d.getMonth() + 1) + '/' + d.getDate();
-        }
-      } else {
-        label = withRt[idx].checked_at;
-      }
+      var label = fmtAxisLabel(withRt[idx].checked_at);
       var anchor = i === 0 ? 'start' : i === xLabels.length - 1 ? 'end' : 'middle';
       svg += '<text x="' + xPos + '" y="' + (h + 16) + '" fill="' + muted + '" font-size="8" text-anchor="' + anchor + '">' + label + '</text>';
     }
 
     svg += '</g></svg>';
     chartEl.innerHTML = svg;
+
+    var svgEl = chartEl.querySelector('#chart-svg');
+    if (svgEl) {
+      var overlay = svgEl.querySelector('.chart-hover-overlay');
+      var hoverLine = svgEl.querySelector('.chart-hover-line');
+      var tooltip = document.getElementById('chart-tooltip');
+      if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.id = 'chart-tooltip';
+        tooltip.style.cssText = 'position:fixed;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:11px;pointer-events:none;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.2);display:none;line-height:1.5';
+        document.body.appendChild(tooltip);
+      }
+      var rect = chartEl.getBoundingClientRect();
+      overlay.addEventListener('mousemove', function (e) {
+        var chartRect = chartEl.getBoundingClientRect();
+        var mx = e.clientX - chartRect.left - margin.left;
+        if (mx < 0 || mx > w) { hoverLine.style.display = 'none'; tooltip.style.display = 'none'; return; }
+        var ratio = mx / w;
+        var idx = Math.round(ratio * (withRt.length - 1));
+        idx = Math.max(0, Math.min(withRt.length - 1, idx));
+        var xPos = (idx / (withRt.length - 1)) * w;
+        hoverLine.setAttribute('x1', xPos);
+        hoverLine.setAttribute('x2', xPos);
+        hoverLine.style.display = '';
+
+        var pt = withRt[idx];
+        var d = new Date(_toUtcIso(pt.checked_at));
+        var timeStr = pt.checked_at;
+        if (!isNaN(d.getTime())) {
+          timeStr = d.toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+        }
+        tooltip.innerHTML = '<div>' + timeStr + '</div><div style="font-weight:600;color:' + color + '">' + pt.response_time_ms + ' ms</div>';
+        tooltip.style.display = '';
+        var tipW = tooltip.offsetWidth || 160;
+        var tipH = tooltip.offsetHeight || 44;
+        var left = e.clientX - tipW / 2;
+        var top = e.clientY - tipH - 12;
+        if (left < 10) left = 10;
+        if (left + tipW > window.innerWidth - 10) left = window.innerWidth - tipW - 10;
+        if (top < 10) top = e.clientY + 12;
+        tooltip.style.left = left + 'px';
+        tooltip.style.top = top + 'px';
+      });
+      overlay.addEventListener('mouseleave', function () {
+        hoverLine.style.display = 'none';
+        tooltip.style.display = 'none';
+      });
+    }
   }).catch(function () { chartEl.innerHTML = '<span class="text-muted">Failed to load</span>'; });
 }
 
