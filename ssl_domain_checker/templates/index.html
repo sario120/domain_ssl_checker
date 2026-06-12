@@ -1222,24 +1222,80 @@
     <div class="modal-backdrop" data-action="close-webapp-detail"></div>
     <div class="modal-content modal-lg">
       <div class="modal-header">
-        <h3 id="webapp-detail-title">Web App Details</h3>
+        <div>
+          <h3 id="webapp-detail-title">Web App Details</h3>
+          <span class="text-muted" id="detail-wa-url" style="font-size:12px"></span>
+        </div>
         <button class="modal-close" data-action="close-webapp-detail">&times;</button>
       </div>
       <div class="modal-body" id="webapp-detail-body">
-        <div class="detail-grid">
-          <div class="detail-stat"><span class="detail-label">Status</span><span id="detail-wa-status"></span></div>
-          <div class="detail-stat"><span class="detail-label">Response Time</span><span id="detail-wa-rt"></span></div>
-          <div class="detail-stat"><span class="detail-label">Status Code</span><span id="detail-wa-code"></span></div>
-          <div class="detail-stat"><span class="detail-label">Uptime</span><span id="detail-wa-uptime"></span></div>
-          <div class="detail-stat"><span class="detail-label">Total Checks</span><span id="detail-wa-total"></span></div>
-          <div class="detail-stat"><span class="detail-label">Interval</span><span id="detail-wa-interval"></span></div>
-          <div class="detail-stat"><span class="detail-label">Last Checked</span><span id="detail-wa-checked"></span></div>
-          <div class="detail-stat"><span class="detail-label">Method</span><span id="detail-wa-method"></span></div>
+        <!-- Status row -->
+        <div class="detail-status-row">
+          <div>
+            <span class="wa-detail-status-badge" id="detail-wa-status-badge"></span>
+            <span class="wa-detail-duration" id="detail-wa-current-duration"></span>
+          </div>
+          <div class="detail-last-check">
+            <span class="detail-label">Last check</span>
+            <span id="detail-wa-last-checked-ago"></span>
+            <span class="detail-label" style="margin-left:8px">Checked every</span>
+            <span id="detail-wa-interval"></span>
+          </div>
         </div>
-        <h4 style="margin:16px 0 8px;font-size:13px;color:var(--text-muted)">Response Time Trend (7 days)</h4>
-        <div id="detail-wa-spark" style="height:80px;width:100%"></div>
-        <h4 style="margin:16px 0 8px;font-size:13px;color:var(--text-muted)">Recent Checks</h4>
-        <div id="detail-wa-history" style="max-height:200px;overflow-y:auto"></div>
+
+        <!-- Uptime grid -->
+        <div class="detail-uptime-grid">
+          <div class="uptime-period">
+            <div class="uptime-period-header">
+              <span class="uptime-period-label">Last 24 hours</span>
+              <span class="uptime-period-value" id="uptime-24h-pct">—</span>
+            </div>
+            <div class="uptime-bar-bg"><div class="uptime-bar" id="uptime-24h-bar"></div></div>
+            <div class="uptime-period-sub"><span id="uptime-24h-incidents">0</span> incidents, <span id="uptime-24h-down">0</span>m down</div>
+          </div>
+          <div class="uptime-period">
+            <div class="uptime-period-header">
+              <span class="uptime-period-label">Last 7 days</span>
+              <span class="uptime-period-value" id="uptime-7d-pct">—</span>
+            </div>
+            <div class="uptime-bar-bg"><div class="uptime-bar" id="uptime-7d-bar"></div></div>
+            <div class="uptime-period-sub"><span id="uptime-7d-incidents">0</span> incidents, <span id="uptime-7d-down">0</span>m down</div>
+          </div>
+          <div class="uptime-period">
+            <div class="uptime-period-header">
+              <span class="uptime-period-label">Last 30 days</span>
+              <span class="uptime-period-value" id="uptime-30d-pct">—</span>
+            </div>
+            <div class="uptime-bar-bg"><div class="uptime-bar" id="uptime-30d-bar"></div></div>
+            <div class="uptime-period-sub"><span id="uptime-30d-incidents">0</span> incidents, <span id="uptime-30d-down">0</span>m down</div>
+          </div>
+          <div class="uptime-period">
+            <div class="uptime-period-header">
+              <span class="uptime-period-label">Last 365 days</span>
+              <span class="uptime-period-value" id="uptime-365d-pct">—</span>
+            </div>
+            <div class="uptime-bar-bg"><div class="uptime-bar" id="uptime-365d-bar"></div></div>
+            <div class="uptime-period-sub"><span id="uptime-365d-incidents">0</span> incidents, <span id="uptime-365d-down">0</span>m down</div>
+          </div>
+        </div>
+
+        <!-- Response time -->
+        <div class="detail-section">
+          <div class="detail-section-header">Response time <span class="text-muted">(7 days)</span></div>
+          <div class="rt-stats-row">
+            <div class="rt-stat"><span class="rt-stat-value" id="detail-wa-avg-rt">—</span><span class="rt-stat-label">Average</span></div>
+            <div class="rt-stat"><span class="rt-stat-value" id="detail-wa-min-rt">—</span><span class="rt-stat-label">Minimum</span></div>
+            <div class="rt-stat"><span class="rt-stat-value" id="detail-wa-max-rt">—</span><span class="rt-stat-label">Maximum</span></div>
+            <div class="rt-stat"><span class="rt-stat-value" id="detail-wa-last-rt">—</span><span class="rt-stat-label">Latest</span></div>
+          </div>
+          <div id="detail-wa-chart" style="height:120px;width:100%;margin-top:8px"></div>
+        </div>
+
+        <!-- Incidents -->
+        <div class="detail-section">
+          <div class="detail-section-header">Latest incidents</div>
+          <div id="detail-wa-incidents"><div class="text-muted" style="padding:8px 0">No incidents recorded.</div></div>
+        </div>
       </div>
     </div>
   </div>

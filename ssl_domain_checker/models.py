@@ -255,6 +255,7 @@ CREATE TABLE IF NOT EXISTS webapps (
     notify_on_recovery INTEGER DEFAULT 1,
     last_alerted TEXT,
     notes TEXT,
+    status_changed_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -397,6 +398,7 @@ CREATE TABLE IF NOT EXISTS webapps (
     notify_on_recovery BOOLEAN DEFAULT TRUE,
     last_alerted TIMESTAMPTZ,
     notes TEXT,
+    status_changed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -478,6 +480,8 @@ def _run_sqlite_migrations():
     wcols = {r[1] for r in conn.execute("PRAGMA table_info(webapps)").fetchall()}
     if "last_alerted" not in wcols:
         conn.execute("ALTER TABLE webapps ADD COLUMN last_alerted TEXT")
+    if "status_changed_at" not in wcols:
+        conn.execute("ALTER TABLE webapps ADD COLUMN status_changed_at TEXT")
     conn.commit()
 
 
@@ -527,6 +531,8 @@ def _run_postgres_migrations():
 
     if 'last_alerted' not in db.table_columns('webapps'):
         conn.execute("ALTER TABLE webapps ADD COLUMN last_alerted TIMESTAMPTZ")
+    if 'status_changed_at' not in db.table_columns('webapps'):
+        conn.execute("ALTER TABLE webapps ADD COLUMN status_changed_at TIMESTAMPTZ")
 
     conn.commit()
 
@@ -1381,17 +1387,25 @@ def update_webapp_last_alerted(webapp_id):
 
 def save_webapp_check(webapp_id, result):
     conn = get_db()
+    now = timezone_now_str()
+    row = conn.execute("SELECT status FROM webapps WHERE id=?", (webapp_id,)).fetchone()
+    old_status = row['status'] if row else None
+    new_status = result['status']
+    status_changed = old_status is not None and old_status != new_status
     conn.execute(
         "UPDATE webapps SET status=?, response_time_ms=?, last_status_code=?, "
         "last_checked=?, last_error=?, uptime_count=?, downtime_count=?, "
-        "total_checks=?, successful_checks=?, updated_at=? WHERE id=?",
+        "total_checks=?, successful_checks=?, "
+        "status_changed_at=CASE WHEN ? THEN ? ELSE status_changed_at END, "
+        "updated_at=? WHERE id=?",
         (
-            result['status'], result.get('response_time_ms'),
-            result.get('status_code'), timezone_now_str(),
+            new_status, result.get('response_time_ms'),
+            result.get('status_code'), now,
             result.get('error'), result.get('uptime_count', 0),
             result.get('downtime_count', 0), result.get('total_checks', 0),
             result.get('successful_checks', 0),
-            timezone_now_str(), webapp_id
+            status_changed, now if status_changed else None,
+            now, webapp_id
         )
     )
     conn.commit()
@@ -1417,6 +1431,85 @@ def get_webapp_check_history(webapp_id, days=7):
         (webapp_id, cutoff)
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_webapp_detail_stats(webapp_id):
+    conn = get_db()
+    now = timezone_now()
+    periods = {
+        '24h': now - datetime.timedelta(hours=24),
+        '7d': now - datetime.timedelta(days=7),
+        '30d': now - datetime.timedelta(days=30),
+        '365d': now - datetime.timedelta(days=365),
+    }
+    uptime_data = {}
+    for label, cutoff in periods.items():
+        rows = conn.execute(
+            "SELECT COUNT(*) AS total, "
+            "SUM(CASE WHEN status IN ('up','slow') THEN 1 ELSE 0 END) AS up_count "
+            "FROM webapp_results WHERE webapp_id=? AND checked_at>=?",
+            (webapp_id, cutoff.strftime("%Y-%m-%d %H:%M:%S"))
+        ).fetchone()
+        total = rows['total'] or 0
+        up = rows['up_count'] or 0
+        pct = round((up / total) * 100, 2) if total else None
+        incidents = rows2 = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM webapp_results WHERE webapp_id=? "
+            "AND checked_at>=? AND status='down'",
+            (webapp_id, cutoff.strftime("%Y-%m-%d %H:%M:%S"))
+        ).fetchone()
+        downtime_m = 0
+        if incident_count := (rows2['cnt'] or 0):
+            interval = 5
+            downtime_m = incident_count * interval
+        uptime_data[label] = {
+            'uptime_pct': pct,
+            'incidents': incident_count,
+            'downtime_minutes': downtime_m,
+        }
+
+    wa = get_webapp(webapp_id)
+    current_duration = None
+    sca = parse_dt(wa.get('status_changed_at')) if wa else None
+    if sca:
+        current_duration = int((now - sca).total_seconds())
+    elif wa:
+        lc = parse_dt(wa.get('last_checked'))
+        if lc:
+            current_duration = int((now - lc).total_seconds())
+
+    history = conn.execute(
+        "SELECT checked_at, status FROM webapp_results WHERE webapp_id=? "
+        "ORDER BY checked_at ASC", (webapp_id,)
+    ).fetchall()
+    incidents_list = []
+    prev = None
+    for r in history:
+        st = r['status']
+        if prev is not None and prev != st:
+            incidents_list.append({
+                'from': prev,
+                'to': st,
+                'at': normalise_dt_str(r['checked_at']),
+            })
+        prev = st
+
+    rt_stats = conn.execute(
+        "SELECT AVG(response_time_ms) AS avg_r, MIN(response_time_ms) AS min_r, "
+        "MAX(response_time_ms) AS max_r FROM webapp_results WHERE webapp_id=? "
+        "AND response_time_ms IS NOT NULL",
+        (webapp_id,)
+    ).fetchone()
+
+    return {
+        'current_duration_seconds': current_duration,
+        'uptime': uptime_data,
+        'incidents': incidents_list[-20:],
+        'incident_count': len(incidents_list),
+        'avg_response_time_ms': round(rt_stats['avg_r'], 1) if rt_stats and rt_stats['avg_r'] else None,
+        'min_response_time_ms': round(rt_stats['min_r'], 1) if rt_stats and rt_stats['min_r'] else None,
+        'max_response_time_ms': round(rt_stats['max_r'], 1) if rt_stats and rt_stats['max_r'] else None,
+    }
 
 
 def count_webapps():

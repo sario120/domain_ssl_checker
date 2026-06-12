@@ -967,6 +967,16 @@ def webapp_results(webapp_id):
     return jsonify(history)
 
 
+@app.route('/api/webapps/<int:webapp_id>/detail', methods=['GET'])
+@login_required
+def webapp_detail(webapp_id):
+    wa = models.get_webapp(webapp_id)
+    if not wa:
+        return api_error('Webapp not found', 404)
+    stats = models.get_webapp_detail_stats(webapp_id)
+    return jsonify({'webapp': wa, 'stats': stats})
+
+
 @app.route('/api/webapps/stats', methods=['GET'])
 @login_required
 def webapp_stats():

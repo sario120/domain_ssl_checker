@@ -1457,3 +1457,35 @@ body.dark .badge-json { background: #e65100; color: #ffcc80; }
 .detail-stat { background: var(--bg-input); padding: 10px 12px; border-radius: 6px; }
 .detail-stat .detail-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 2px; }
 .detail-stat span:last-child { font-size: 15px; font-weight: 600; }
+
+/* ─── Detail modal new styles ─────────────────────────────────── */
+.detail-status-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.wa-detail-status-badge { font-size: 20px; font-weight: 700; padding: 4px 14px; border-radius: 6px; letter-spacing: 0.5px; }
+.wa-detail-status-badge.status-up { background: var(--green-bg); color: var(--green); }
+.wa-detail-status-badge.status-slow { background: var(--yellow-bg); color: var(--yellow); }
+.wa-detail-status-badge.status-down { background: var(--red-bg); color: var(--red); }
+.wa-detail-duration { font-size: 14px; color: var(--text-muted); margin-left: 10px; }
+.detail-last-check { font-size: 12px; color: var(--text-muted); text-align: right; }
+.detail-last-check .detail-label { display: inline; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.detail-section { margin-top: 20px; }
+.detail-section-header { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+
+.uptime-period { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.uptime-period-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.uptime-period-label { font-size: 12px; font-weight: 500; }
+.uptime-period-value { font-size: 18px; font-weight: 700; }
+.uptime-bar-bg { height: 6px; background: var(--bg-input); border-radius: 3px; overflow: hidden; }
+.uptime-bar { height: 100%; border-radius: 3px; background: var(--primary); transition: width 0.4s ease; }
+.uptime-period-sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+.detail-uptime-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.rt-stats-row { display: flex; gap: 16px; }
+.rt-stat { background: var(--bg-input); padding: 8px 14px; border-radius: 6px; text-align: center; flex: 1; }
+.rt-stat-value { display: block; font-size: 16px; font-weight: 700; }
+.rt-stat-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-top: 2px; }
+.incident-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.incident-icon { font-size: 16px; }
+.incident-icon.healthy { color: var(--green); }
+.incident-icon.expired { color: var(--red); }
+.incident-dir { flex: 1; font-weight: 500; }
+.incident-time { color: var(--text-muted); font-size: 12px; }

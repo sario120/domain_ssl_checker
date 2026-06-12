@@ -1125,59 +1125,123 @@ function escUrl(u) {
   return escHtml(u.length > 60 ? u.slice(0, 57) + '...' : u);
 }
 
+function formatDurationLong(seconds) {
+  if (seconds == null) return 'N/A';
+  if (seconds < 60) return '< 1m';
+  var min = Math.floor(seconds / 60);
+  if (min < 60) return min + 'm';
+  var hr = Math.floor(min / 60);
+  if (hr < 24) return formatDurationCompact(hr, min % 60, 0, 0);
+  var days = Math.floor(hr / 24);
+  if (days < 30) return formatDurationCompact(0, 0, days, hr % 24);
+  var months = Math.floor(days / 30);
+  var remDays = days % 30;
+  if (months < 12) return months + 'mo ' + remDays + 'd';
+  var years = Math.floor(months / 12);
+  return years + 'yr ' + (months % 12) + 'mo';
+}
+function formatDurationCompact(h, m, d, hr) {
+  var parts = [];
+  if (d > 0) parts.push(d + 'd');
+  if (hr > 0) parts.push(hr + 'h');
+  if (m > 0) parts.push(m + 'm');
+  if (h > 0) parts.push(h + 'h');
+  return parts.join(' ') || '0m';
+}
+
 function openWebAppDetail(wa) {
   var modal = document.getElementById('webapp-detail-modal');
   document.getElementById('webapp-detail-title').textContent = wa.name || wa.url;
-  var total = wa.total_checks || 0;
-  var uptimePct = total ? Math.round((wa.successful_checks || 0) / total * 100) + '%' : '—';
-  document.getElementById('detail-wa-status').textContent = (wa.status || 'unknown').toUpperCase();
-  document.getElementById('detail-wa-rt').textContent = wa.response_time_ms != null ? wa.response_time_ms + 'ms' : '—';
-  document.getElementById('detail-wa-code').textContent = wa.last_status_code || '—';
-  document.getElementById('detail-wa-uptime').textContent = uptimePct;
-  document.getElementById('detail-wa-total').textContent = total;
+  document.getElementById('detail-wa-url').textContent = wa.url || '';
+
+  var status = wa.status || 'unknown';
+  var isUp = status === 'up' || status === 'slow';
+  var badge = document.getElementById('detail-wa-status-badge');
+  badge.textContent = status.toUpperCase();
+  badge.className = 'wa-detail-status-badge ' + (isUp ? 'status-up' : status === 'slow' ? 'status-slow' : 'status-down');
+
   var interval = wa.check_interval || 300;
   document.getElementById('detail-wa-interval').textContent = interval >= 3600 ? Math.round(interval / 3600) + 'h' : interval >= 60 ? Math.round(interval / 60) + 'm' : interval + 's';
-  document.getElementById('detail-wa-checked').textContent = wa.last_checked ? relativeTime(wa.last_checked) : 'Never';
-  document.getElementById('detail-wa-method').textContent = wa.method || 'GET';
+  document.getElementById('detail-wa-last-checked-ago').textContent = wa.last_checked ? relativeTime(wa.last_checked) : 'Never';
 
-  var sparkEl = document.getElementById('detail-wa-spark');
-  sparkEl.innerHTML = 'Loading...';
-  var historyEl = document.getElementById('detail-wa-history');
-  historyEl.innerHTML = '';
+  var durationEl = document.getElementById('detail-wa-current-duration');
+  durationEl.textContent = 'Loading...';
+  var chartEl = document.getElementById('detail-wa-chart');
+  chartEl.innerHTML = 'Loading...';
+  var incidentsEl = document.getElementById('detail-wa-incidents');
+  incidentsEl.innerHTML = '';
+
+  api('GET', '/api/webapps/' + wa.id + '/detail').then(function (resp) {
+    var stats = resp.stats;
+    var webapp = resp.webapp;
+
+    durationEl.textContent = isUp
+      ? 'Up for ' + formatDurationLong(stats.current_duration_seconds)
+      : (stats.current_duration_seconds != null ? 'Down for ' + formatDurationLong(stats.current_duration_seconds) : '');
+
+    function renderUptimeBar(period) {
+      var pct = stats.uptime[period].uptime_pct;
+      var incidents = stats.uptime[period].incidents;
+      var downMin = stats.uptime[period].downtime_minutes;
+      document.getElementById('uptime-' + period + '-pct').textContent = pct != null ? pct + '%' : '—';
+      document.getElementById('uptime-' + period + '-bar').style.width = (pct != null ? pct : 0) + '%';
+      document.getElementById('uptime-' + period + '-incidents').textContent = (incidents || 0);
+      document.getElementById('uptime-' + period + '-down').textContent = (downMin || 0);
+    }
+    renderUptimeBar('24h');
+    renderUptimeBar('7d');
+    renderUptimeBar('30d');
+    renderUptimeBar('365d');
+
+    document.getElementById('detail-wa-avg-rt').textContent = stats.avg_response_time_ms != null ? stats.avg_response_time_ms + 'ms' : '—';
+    document.getElementById('detail-wa-min-rt').textContent = stats.min_response_time_ms != null ? stats.min_response_time_ms + 'ms' : '—';
+    document.getElementById('detail-wa-max-rt').textContent = stats.max_response_time_ms != null ? stats.max_response_time_ms + 'ms' : '—';
+    document.getElementById('detail-wa-last-rt').textContent = webapp.response_time_ms != null ? webapp.response_time_ms + 'ms' : '—';
+
+    if (stats.incidents && stats.incidents.length) {
+      incidentsEl.innerHTML = stats.incidents.slice().reverse().map(function (inc) {
+        var icon = inc.to === 'up' || inc.to === 'slow' ? '&#9673;' : '&#9888;';
+        var cls = inc.to === 'up' || inc.to === 'slow' ? 'healthy' : 'expired';
+        return '<div class="incident-row">' +
+          '<span class="incident-icon ' + cls + '">' + icon + '</span>' +
+          '<span class="incident-dir">' + inc.from.toUpperCase() + ' &rarr; ' + inc.to.toUpperCase() + '</span>' +
+          '<span class="incident-time">' + relativeTime(inc.at) + '</span>' +
+          '</div>';
+      }).join('');
+    } else {
+      incidentsEl.innerHTML = '<div class="text-muted" style="padding:8px 0">No incidents recorded.</div>';
+    }
+  }).catch(function () {
+    durationEl.textContent = '—';
+    chartEl.innerHTML = '<span class="text-muted">Failed to load detail data</span>';
+    incidentsEl.innerHTML = '';
+  });
 
   api('GET', '/api/webapps/' + wa.id + '/results?days=7').then(function (data) {
     var rts = data.filter(function (d) { return d.response_time_ms != null; }).map(function (d) { return d.response_time_ms; });
     if (rts.length < 2) {
-      sparkEl.innerHTML = '<span class="text-muted">Not enough data</span>';
+      chartEl.innerHTML = '<span class="text-muted">Not enough data</span>';
     } else {
-      var w = sparkEl.offsetWidth || 400;
-      var h = 80;
+      var w = chartEl.offsetWidth || 500;
+      var h = 120;
+      var pad = 4;
       var max = Math.max.apply(null, rts);
       var min = Math.min.apply(null, rts);
       var range = max - min || 1;
-      var points = rts.map(function (v, i) {
-        var x = (i / (rts.length - 1)) * w;
-        var y = h - ((v - min) / range) * (h - 4) - 2;
+      var color = getComputedStyle(document.body).getPropertyValue('--primary').trim() || '#3b82f6';
+      var areaColor = color + '22';
+      var pts = rts.map(function (v, i) {
+        var x = (i / (rts.length - 1)) * (w - pad * 2) + pad;
+        var y = h - ((v - min) / range) * (h - pad * 2) - pad;
         return x + ',' + y;
       }).join(' ');
-      var color = getComputedStyle(document.body).getPropertyValue('--primary').trim() || '#3b82f6';
-      sparkEl.innerHTML = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" style="display:block;width:100%;height:80px">' +
-        '<polyline fill="none" stroke="' + color + '" stroke-width="2" points="' + points + '"/>' +
+      var areaPts = pad + ',' + (h - pad) + ' ' + pts + ' ' + (w - pad) + ',' + (h - pad);
+      chartEl.innerHTML = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" style="display:block;width:100%;height:120px">' +
+        '<polygon fill="' + areaColor + '" points="' + areaPts + '"/>' +
+        '<polyline fill="none" stroke="' + color + '" stroke-width="2" points="' + pts + '"/>' +
         '</svg>';
     }
-    historyEl.innerHTML = data.slice(-20).reverse().map(function (d) {
-      var st = d.status || 'unknown';
-      var cls = st === 'up' ? 'healthy' : st === 'down' ? 'expired' : st === 'slow' ? 'warning' : 'pending';
-      var rt = d.response_time_ms != null ? d.response_time_ms + 'ms' : '—';
-      var code = d.status_code || '—';
-      return '<div class="log-row" style="display:flex;gap:12px;padding:4px 0;font-size:12px;border-bottom:1px solid var(--border)">' +
-        '<span class="domain-badge status-badge ' + cls + '" style="flex-shrink:0">' + st.toUpperCase() + '</span>' +
-        '<span style="flex:1">Code: ' + code + '</span>' +
-        '<span style="width:80px;text-align:right">' + rt + '</span>' +
-        '<span class="text-muted" style="width:140px;text-align:right">' + relativeTime(d.checked_at) + '</span>' +
-        '</div>';
-    }).join('') || '<span class="text-muted">No history</span>';
-  }).catch(function () { sparkEl.innerHTML = '<span class="text-muted">Failed to load</span>'; });
+  }).catch(function () { chartEl.innerHTML = '<span class="text-muted">Failed to load</span>'; });
 
   modal.classList.add('open');
 }
