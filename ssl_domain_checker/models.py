@@ -230,6 +230,46 @@ CREATE TABLE IF NOT EXISTS check_results (
     domain_days_left INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_check_results_domain ON check_results(domain_id, checked_at DESC);
+CREATE TABLE IF NOT EXISTS webapps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    method TEXT DEFAULT 'GET',
+    expected_status INTEGER DEFAULT 200,
+    expected_body TEXT,
+    timeout INTEGER DEFAULT 10,
+    headers TEXT,
+    body TEXT,
+    check_interval INTEGER DEFAULT 300,
+    status TEXT DEFAULT 'unknown',
+    response_time_ms REAL,
+    last_status_code INTEGER,
+    last_checked TEXT,
+    last_error TEXT,
+    uptime_count INTEGER DEFAULT 0,
+    downtime_count INTEGER DEFAULT 0,
+    total_checks INTEGER DEFAULT 0,
+    successful_checks INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    notify_on_down INTEGER DEFAULT 1,
+    notify_on_recovery INTEGER DEFAULT 1,
+    last_alerted TEXT,
+    notes TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_webapps_status ON webapps(status);
+CREATE INDEX IF NOT EXISTS idx_webapps_active ON webapps(is_active);
+CREATE TABLE IF NOT EXISTS webapp_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    webapp_id INTEGER NOT NULL REFERENCES webapps(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    status_code INTEGER,
+    response_time_ms REAL,
+    error TEXT,
+    checked_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_webapp_results_app ON webapp_results(webapp_id, checked_at DESC);
 """
 
 _PG_SCHEMA = """
@@ -332,6 +372,46 @@ CREATE TABLE IF NOT EXISTS check_results (
 );
 CREATE INDEX IF NOT EXISTS idx_check_results_domain ON check_results(domain_id, checked_at DESC);
 ALTER TABLE domains ADD COLUMN IF NOT EXISTS check_details JSONB;
+CREATE TABLE IF NOT EXISTS webapps (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    method TEXT DEFAULT 'GET',
+    expected_status INTEGER DEFAULT 200,
+    expected_body TEXT,
+    timeout INTEGER DEFAULT 10,
+    headers JSONB,
+    body TEXT,
+    check_interval INTEGER DEFAULT 300,
+    status TEXT DEFAULT 'unknown',
+    response_time_ms DOUBLE PRECISION,
+    last_status_code INTEGER,
+    last_checked TIMESTAMPTZ,
+    last_error TEXT,
+    uptime_count INTEGER DEFAULT 0,
+    downtime_count INTEGER DEFAULT 0,
+    total_checks INTEGER DEFAULT 0,
+    successful_checks INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT TRUE,
+    notify_on_down BOOLEAN DEFAULT TRUE,
+    notify_on_recovery BOOLEAN DEFAULT TRUE,
+    last_alerted TIMESTAMPTZ,
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_webapps_status ON webapps(status);
+CREATE INDEX IF NOT EXISTS idx_webapps_active ON webapps(is_active);
+CREATE TABLE IF NOT EXISTS webapp_results (
+    id BIGSERIAL PRIMARY KEY,
+    webapp_id INTEGER NOT NULL REFERENCES webapps(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    status_code INTEGER,
+    response_time_ms DOUBLE PRECISION,
+    error TEXT,
+    checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_webapp_results_app ON webapp_results(webapp_id, checked_at DESC);
 """;
 
 _MIGRATION_DOMAIN_COLS = frozenset({
@@ -395,6 +475,9 @@ def _run_sqlite_migrations():
             if col not in _MIGRATION_SETTINGS_COLS:
                 raise ValueError(f"Invalid migration column: {col}")
             conn.execute(f"ALTER TABLE settings ADD COLUMN {col} TEXT")
+    wcols = {r[1] for r in conn.execute("PRAGMA table_info(webapps)").fetchall()}
+    if "last_alerted" not in wcols:
+        conn.execute("ALTER TABLE webapps ADD COLUMN last_alerted TEXT")
     conn.commit()
 
 
@@ -441,6 +524,9 @@ def _run_postgres_migrations():
             if col not in _MIGRATION_SETTINGS_COLS:
                 raise ValueError(f"Invalid migration column: {col}")
             conn.execute(f"ALTER TABLE settings ADD COLUMN {col} {dtype} DEFAULT FALSE")
+
+    if 'last_alerted' not in db.table_columns('webapps'):
+        conn.execute("ALTER TABLE webapps ADD COLUMN last_alerted TIMESTAMPTZ")
 
     conn.commit()
 
@@ -716,6 +802,10 @@ def cleanup_old_data(retention_days=90):
         (cutoff,)
     ).rowcount
     deleted += conn.execute(
+        "DELETE FROM webapp_results WHERE checked_at < ?",
+        (cutoff,)
+    ).rowcount
+    deleted += conn.execute(
         "DELETE FROM rate_limits WHERE window_start < ?",
         (time.time() - 86400,)
     ).rowcount
@@ -918,7 +1008,7 @@ def update_user(user_id, password=None, role=None, is_active=None):
     if role and role in ('admin', 'user', 'viewer'):
         filtered.append(("role=?", role))
     if is_active is not None:
-        filtered.append(("is_active=?", 1 if is_active else 0))
+        filtered.append(("is_active=?", bool(is_active)))
     if not filtered:
         return {"ok": True}
     sets = ", ".join(s for s, _ in filtered)
@@ -992,8 +1082,8 @@ def update_security_settings(data):
             WHERE id=?""",
             (data.get('session_timeout', 60), data.get('max_login_attempts', 5),
              data.get('lockout_duration', 15), data.get('min_password_length', 8),
-             1 if data.get('require_uppercase') else 0, 1 if data.get('require_lowercase') else 0,
-             1 if data.get('require_number') else 0, 1 if data.get('require_special') else 0,
+             bool(data.get('require_uppercase', True)), bool(data.get('require_lowercase', True)),
+             bool(data.get('require_number', True)), bool(data.get('require_special', False)),
              existing['id']))
     else:
         conn.execute("""INSERT INTO security_settings
@@ -1003,8 +1093,8 @@ def update_security_settings(data):
             VALUES (?,?,?,?,?,?,?,?)""",
             (data.get('session_timeout', 60), data.get('max_login_attempts', 5),
              data.get('lockout_duration', 15), data.get('min_password_length', 8),
-             1 if data.get('require_uppercase') else 0, 1 if data.get('require_lowercase') else 0,
-             1 if data.get('require_number') else 0, 1 if data.get('require_special') else 0))
+             bool(data.get('require_uppercase', True)), bool(data.get('require_lowercase', True)),
+             bool(data.get('require_number', True)), bool(data.get('require_special', False))))
     conn.commit()
 
 
@@ -1183,7 +1273,18 @@ def get_dashboard_summary():
         'expiry_buckets': {'ssl': ssl_buckets, 'domain': domain_buckets},
         'last_check': last_check,
         'history': [dict(r) for r in snapshots],
+        'webapp_stats': get_webapp_stats(),
     }
+
+
+def count_users():
+    conn = get_db()
+    return conn.execute("SELECT COUNT(*) AS cnt FROM users").fetchone()['cnt']
+
+
+def count_domains():
+    conn = get_db()
+    return conn.execute("SELECT COUNT(*) AS cnt FROM domains").fetchone()['cnt']
 
 
 def get_domain_status_counts():
@@ -1205,3 +1306,132 @@ def get_domain_check_history(domain_id, days=7):
         (domain_id, cutoff)
     ).fetchall()
     return [{'date': normalise_dt_str(r['checked_at']), 'ssl_days_left': r['ssl_days_left']} for r in rows]
+
+
+# ─── Webapps ────────────────────────────────────────────────────
+
+def get_webapps():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM webapps ORDER BY name ASC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_webapp(webapp_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM webapps WHERE id=?", (webapp_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def add_webapp(name, url, method='GET', expected_status=200, expected_body=None,
+               timeout=10, headers=None, body=None, check_interval=300,
+               notify_on_down=True, notify_on_recovery=True, notes=''):
+    conn = get_db()
+    try:
+        cur = conn.execute(
+            "INSERT INTO webapps (name, url, method, expected_status, expected_body, "
+            "timeout, headers, body, check_interval, notify_on_down, notify_on_recovery, notes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            (name, url, method, expected_status, expected_body,
+             timeout, headers, body, check_interval,
+             bool(notify_on_down), bool(notify_on_recovery), notes)
+        )
+        new_id = cur.fetchone()['id']
+        conn.commit()
+        return {"ok": True, "id": new_id}
+    except Exception as e:
+        conn.rollback()
+        logger.exception("Failed to add webapp %s", url)
+        return {"ok": False, "error": str(e)}
+
+
+def update_webapp(webapp_id, **kwargs):
+    allowed = frozenset({'name', 'url', 'method', 'expected_status', 'expected_body',
+                         'timeout', 'headers', 'body', 'check_interval', 'notes',
+                         'notify_on_down', 'notify_on_recovery', 'is_active'})
+    sets = []
+    vals = []
+    for k, v in kwargs.items():
+        if k not in allowed:
+            continue
+        if k in ('notify_on_down', 'notify_on_recovery', 'is_active'):
+            v = bool(v)
+        sets.append(f"{k}=?")
+        vals.append(v)
+    if not sets:
+        return False
+    vals.append(webapp_id)
+    conn = get_db()
+    conn.execute(f"UPDATE webapps SET {', '.join(sets)}, updated_at={db.placeholder()} WHERE id=?",
+                 (*vals, timezone_now_str()))
+    conn.commit()
+    return True
+
+
+def delete_webapp(webapp_id):
+    conn = get_db()
+    conn.execute("DELETE FROM webapps WHERE id=?", (webapp_id,))
+    conn.commit()
+
+
+def update_webapp_last_alerted(webapp_id):
+    conn = get_db()
+    conn.execute("UPDATE webapps SET last_alerted=? WHERE id=?", (timezone_now_str(), webapp_id))
+    conn.commit()
+
+
+def save_webapp_check(webapp_id, result):
+    conn = get_db()
+    conn.execute(
+        "UPDATE webapps SET status=?, response_time_ms=?, last_status_code=?, "
+        "last_checked=?, last_error=?, uptime_count=?, downtime_count=?, "
+        "total_checks=?, successful_checks=?, updated_at=? WHERE id=?",
+        (
+            result['status'], result.get('response_time_ms'),
+            result.get('status_code'), timezone_now_str(),
+            result.get('error'), result.get('uptime_count', 0),
+            result.get('downtime_count', 0), result.get('total_checks', 0),
+            result.get('successful_checks', 0),
+            timezone_now_str(), webapp_id
+        )
+    )
+    conn.commit()
+
+
+def save_webapp_check_result(webapp_id, result):
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO webapp_results (webapp_id, status, status_code, response_time_ms, error, checked_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (webapp_id, result['status'], result.get('status_code'),
+         result.get('response_time_ms'), result.get('error'), timezone_now_str())
+    )
+    conn.commit()
+
+
+def get_webapp_check_history(webapp_id, days=7):
+    conn = get_db()
+    cutoff = (timezone_now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute(
+        "SELECT checked_at, response_time_ms, status, status_code, error FROM webapp_results "
+        "WHERE webapp_id=? AND checked_at>=? ORDER BY checked_at ASC",
+        (webapp_id, cutoff)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def count_webapps():
+    conn = get_db()
+    return conn.execute("SELECT COUNT(*) AS cnt FROM webapps").fetchone()['cnt']
+
+
+def get_webapp_stats():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT COALESCE(status, 'unknown') AS st, COUNT(*) AS cnt FROM webapps GROUP BY st"
+    ).fetchall()
+    stats = {'up': 0, 'down': 0, 'slow': 0, 'unknown': 0}
+    for r in rows:
+        if r['st'] in stats:
+            stats[r['st']] = r['cnt']
+    stats['total'] = sum(stats.values())
+    return stats

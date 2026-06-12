@@ -35,7 +35,7 @@ def _try_acquire_lock():
         return False
 
 
-def start_scheduler(check_all_callback):
+def start_scheduler(check_all_callback, check_webapps_callback=None):
     if scheduler.get_job('check_all_domains'):
         return
     if not _try_acquire_lock():
@@ -51,6 +51,14 @@ def start_scheduler(check_all_callback):
         name='Check all domains',
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
     )
+    if check_webapps_callback:
+        scheduler.add_job(
+            check_webapps_callback,
+            'interval',
+            minutes=1,
+            id='check_webapps',
+            name='Check webapps',
+        )
     retention_days = int(os.environ.get('DATA_RETENTION_DAYS', '90'))
     if not scheduler.get_job('cleanup_old_data'):
         from models import cleanup_old_data

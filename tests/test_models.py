@@ -21,6 +21,7 @@ import models as models_mod
 
 
 def _init_test_db():
+    close_db()
     tmpdir = tempfile.mkdtemp(prefix="vigil_test_")
     _test_dirs.append(tmpdir)
     db_path = os.path.join(tmpdir, "test.db")

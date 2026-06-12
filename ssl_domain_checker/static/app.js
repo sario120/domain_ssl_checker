@@ -70,6 +70,7 @@ function activateView(viewName) {
   if (viewName === 'backups') loadBackupsView();
   if (viewName === 'domains') loadDomains('full', true);
   if (viewName === 'sslcerts') loadDomains('ssl_only', true);
+  if (viewName === 'webapps') loadWebApps(true);
 }
 
 document.querySelectorAll('.nav-tab').forEach(tab => {
@@ -157,6 +158,7 @@ document.addEventListener('click', (e) => {
   else if (action === 'filter-domains') filterDomainsFromDash(btn.dataset.type, btn.dataset.status);
   else if (action === 'back-to-top') window.scrollTo({ top: 0, behavior: 'smooth' });
   else if (action === 'go-dashboard') { window.location.hash = 'dashboard'; activateView('dashboard'); }
+  else if (action === 'go-webapps') { window.location.hash = 'webapps'; activateView('webapps'); }
   else if (action === 'go-domain') openDomainInNewTab(parseInt(btn.dataset.id));
   else if (action === 'quick-check') { e.stopPropagation(); quickCheck(parseInt(btn.dataset.id)); }
   else if (action === 'test-webhook') { testWebhook(btn.dataset.webhookType); }
@@ -178,6 +180,84 @@ document.addEventListener('click', (e) => {
   else if (action === 'refresh-email-templates') { loadEmailTemplates(true); }
   else if (action === 'toggle-quickadd') { openQuickAddModal(); }
   else if (action === 'close-quickadd-modal') { closeQuickAddModal(); }
+
+  // ─── Web Apps actions ──────────────────────────────────────────
+  else if (action === 'add-webapp') { openWebAppModal(null); }
+  else if (action === 'close-webapp-modal') { closeWebAppModal(); }
+  else if (action === 'toggle-view-webapps') {
+    _webappViewMode = _webappViewMode === 'table' ? 'cards' : 'table';
+    var label = btn.querySelector('.view-toggle-label');
+    if (label) label.textContent = _webappViewMode === 'table' ? 'Cards' : 'Table';
+    btn.querySelector('.view-toggle-icon').innerHTML = _webappViewMode === 'table' ? '&#9776;' : '&#9632;';
+    applyWebAppFilters(_webappsCache || []);
+  }
+  else if (action === 'check-all-webapps') {
+    api('POST', '/api/webapps/check-all').then(function () { loadWebApps(true); toast('All web apps checked'); }).catch(function (e) { toast(e.message, 'error'); });
+  }
+  else if (action === 'webapp-check-now') {
+    var wid = parseInt(btn.dataset.id);
+    api('POST', '/api/webapps/' + wid + '/check').then(function () { loadWebApps(true); }).catch(function (e) { toast(e.message, 'error'); });
+  }
+  else if (action === 'webapp-edit') {
+    var wid = parseInt(btn.dataset.id);
+    var app = (_webappsCache || []).find(function (a) { return a.id === wid; });
+    if (app) openWebAppModal(app);
+  }
+  else if (action === 'webapp-delete') {
+    var wid = parseInt(btn.dataset.id);
+    if (!confirm('Delete this web app?')) return;
+    api('DELETE', '/api/webapps/' + wid).then(function () { loadWebApps(true); toast('Web app deleted'); }).catch(function (e) { toast(e.message, 'error'); });
+  }
+  else if (action === 'webapp-bulk-check') {
+    var ids = Array.from(_selectedWebapps);
+    if (!ids.length) return;
+    Promise.all(ids.map(function (id) { return api('POST', '/api/webapps/' + id + '/check'); })).then(function () {
+      _selectedWebapps.clear(); loadWebApps(true); toast('Checked ' + ids.length + ' web apps');
+    }).catch(function (e) { toast(e.message, 'error'); });
+  }
+  else if (action === 'webapp-bulk-delete') {
+    var ids = Array.from(_selectedWebapps);
+    if (!ids.length) return;
+    if (!confirm('Delete ' + ids.length + ' web apps?')) return;
+    api('POST', '/api/webapps/bulk-delete', { ids: ids }).then(function () {
+      _selectedWebapps.clear(); loadWebApps(true); toast('Deleted ' + ids.length + ' web apps');
+    }).catch(function (e) { toast(e.message, 'error'); });
+  }
+  else if (action === 'webapp-bulk-deselect') { _selectedWebapps.clear(); applyWebAppFilters(_webappsCache || []); }
+  else if (action === 'toggle-columns-webapp') {
+    var dd = document.getElementById('col-dropdown-webapp');
+    if (dd) dd.style.display = dd.style.display === 'none' ? '' : 'none';
+  }
+  else if (action === 'refresh-webapps') { loadWebApps(true); }
+  else if (action === 'webapp-export-csv') {
+    window.open('/api/webapps/export/csv', '_blank');
+  }
+  else if (action === 'webapp-toggle-active') {
+    var wid = parseInt(btn.dataset.id);
+    var app = (_webappsCache || []).find(function (a) { return a.id === wid; });
+    if (!app) return;
+    var newVal = app.is_active === 0 || app.is_active === false ? 1 : 0;
+    api('PUT', '/api/webapps/' + wid, { is_active: !!newVal }).then(function () {
+      loadWebApps(true);
+      toast(newVal ? 'Web app resumed' : 'Web app paused');
+    }).catch(function (e) { toast(e.message, 'error'); });
+  }
+  else if (action === 'webapp-detail') {
+    var wid = parseInt(btn.dataset.id);
+    var app = (_webappsCache || []).find(function (a) { return a.id === wid; });
+    if (app) openWebAppDetail(app);
+  }
+  else if (action === 'close-webapp-detail') {
+    document.getElementById('webapp-detail-modal').classList.remove('open');
+  }
+  else if (action === 'clear-webapp-filters') {
+    document.getElementById('webapp-search').value = '';
+    _webappFilter = 'all';
+    document.querySelectorAll('#webapp-filters .log-filter').forEach(function (b) { b.classList.remove('active'); });
+    var allBtn = document.querySelector('#webapp-filters [data-webapp-filter="all"]');
+    if (allBtn) allBtn.classList.add('active');
+    applyWebAppFilters(_webappsCache || []);
+  }
 });
 
 // ─── Collapsible sections ──────────────────────────────────────
@@ -443,6 +523,110 @@ document.getElementById('page-size-ssl').addEventListener('change', (e) => {
   _pagination.ssl_only.page = 1;
   applyDomainFilters('ssl_only');
 });
+document.getElementById('page-size-webapp').addEventListener('change', (e) => {
+  _webappPagination.size = parseInt(e.target.value);
+  _webappPagination.page = 0;
+  applyWebAppFilters(_webappsCache || []);
+});
+
+// ─── Webapp search ──────────────────────────────────────────────
+document.getElementById('webapp-search').addEventListener('input', function () {
+  _webappPagination.page = 0;
+  applyWebAppFilters(_webappsCache || []);
+});
+document.getElementById('webapp-filters').addEventListener('click', (e) => {
+  var btn = e.target.closest('[data-webapp-filter]');
+  if (!btn) return;
+  document.querySelectorAll('#webapp-filters .log-filter').forEach(function (b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  _webappFilter = btn.dataset.webappFilter;
+  _webappPagination.page = 0;
+  applyWebAppFilters(_webappsCache || []);
+});
+document.getElementById('sort-bar-webapp').addEventListener('click', (e) => {
+  var btn = e.target.closest('[data-sort]');
+  if (!btn) return;
+  var key = btn.dataset.sort;
+  if (_webappSort.key === key) _webappSort.dir *= -1;
+  else { _webappSort.key = key; _webappSort.dir = 1; }
+  document.querySelectorAll('#sort-bar-webapp .sort-btn').forEach(function (b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  var arrow = btn.querySelector('.sort-arrow');
+  if (arrow) arrow.innerHTML = _webappSort.dir === 1 ? '&#9650;' : '&#9660;';
+  _webappPagination.page = 0;
+  applyWebAppFilters(_webappsCache || []);
+});
+document.getElementById('pagination-webapp').addEventListener('click', (e) => {
+  var btn = e.target.closest('[data-action^="page-"]');
+  if (!btn) return;
+  var action = btn.dataset.action;
+  if (action === 'page-first-webapp') _webappPagination.page = 0;
+  else if (action === 'page-prev-webapp') _webappPagination.page = Math.max(0, _webappPagination.page - 1);
+  else if (action === 'page-next-webapp') _webappPagination.page = _webappPagination.page + 1;
+  else if (action === 'page-last-webapp') _webappPagination.page = 9999;
+  applyWebAppFilters(_webappsCache || []);
+});
+
+// ─── Webapp bulk select ─────────────────────────────────────────
+document.addEventListener('change', (e) => {
+  var cb = e.target.closest('.webapp-select');
+  if (!cb) return;
+  if (cb.checked) _selectedWebapps.add(parseInt(cb.value));
+  else _selectedWebapps.delete(parseInt(cb.value));
+  updateWebappBulkToolbar();
+});
+document.getElementById('select-all-webapp').addEventListener('change', (e) => {
+  var checked = e.target.checked;
+  document.querySelectorAll('.webapp-select').forEach(function (cb) {
+    cb.checked = checked;
+    var id = parseInt(cb.value);
+    if (checked) _selectedWebapps.add(id);
+    else _selectedWebapps.delete(id);
+  });
+  updateWebappBulkToolbar();
+});
+
+// ─── Webapp column visibility ──────────────────────────────────
+document.addEventListener('change', (e) => {
+  var colCheck = e.target.closest('#col-dropdown-webapp [data-col]');
+  if (!colCheck) return;
+  var tbody = document.getElementById('webapp-table-body');
+  var cols = colCheck.dataset.col;
+  document.querySelectorAll('#webapp-table .' + cols).forEach(function (el) {
+    el.style.display = colCheck.checked ? '' : 'none';
+  });
+});
+
+// ─── Webapp form submit ─────────────────────────────────────────
+document.getElementById('webapp-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  var id = document.getElementById('webapp-id').value;
+  var data = {
+    name: document.getElementById('webapp-name').value.trim(),
+    url: document.getElementById('webapp-url').value.trim(),
+    method: document.getElementById('webapp-method').value,
+    expected_status: parseInt(document.getElementById('webapp-expected-status').value) || 200,
+    expected_body: document.getElementById('webapp-expected-body').value.trim() || null,
+    timeout: parseInt(document.getElementById('webapp-timeout').value) || 10,
+    check_interval: parseInt(document.getElementById('webapp-check-interval').value) || 300,
+    headers: document.getElementById('webapp-headers').value.trim() || null,
+    body: document.getElementById('webapp-body').value || null,
+    notes: document.getElementById('webapp-notes').value.trim(),
+    notify_on_down: document.getElementById('webapp-notify-down').checked,
+    notify_on_recovery: document.getElementById('webapp-notify-recovery').checked,
+  };
+  if (!data.name || !data.url) { toast('Name and URL are required', 'error'); return; }
+  try {
+    if (id) {
+      await api('PUT', '/api/webapps/' + id, data);
+    } else {
+      await api('POST', '/api/webapps', data);
+    }
+    closeWebAppModal();
+    loadWebApps(true);
+    toast(id ? 'Web app updated' : 'Web app added');
+  } catch (e) { toast(e.message, 'error'); }
+});
 
 // ─── Column visibility ─────────────────────────────────────────
 document.addEventListener('change', (e) => {
@@ -632,6 +816,10 @@ document.getElementById('ssl-group-by-status').addEventListener('change', (e) =>
   _groupByStatus.ssl_only = e.target.checked;
   applyDomainFilters('ssl_only');
 });
+document.getElementById('webapp-group-by-status').addEventListener('change', (e) => {
+  _webappGroupByStatus = e.target.checked;
+  applyWebAppFilters(_webappsCache || []);
+});
 
 // Search filtering (debounced)
 let _searchTimers = {};
@@ -701,8 +889,7 @@ async function api(method, path, body) {
 }
 
 function _toUtcIso(dateStr) {
-  // PostgreSQL returns dates with timezone (+00:00, Z); SQLite returns plain strings.
-  // Append 'Z' only when the string has no timezone suffix.
+  dateStr = dateStr.replace(' ', 'T');
   if (/Z$|[+-]\d{2}:?\d{2}$/.test(dateStr)) return dateStr;
   return dateStr + 'Z';
 }
@@ -772,19 +959,25 @@ let _prevHealth = null;
 async function loadDashboard(force = false) {
   const now = Date.now();
   if (!force && _dashSummaryCache.data && now - _dashSummaryCache.ts < _dashSummaryCache.ttl) {
-    const sched = await api('GET', '/api/scheduler/status');
+    const [sched, sysinfo] = await Promise.all([
+      api('GET', '/api/scheduler/status'),
+      api('GET', '/api/system/info')
+    ]);
     const summary = _dashSummaryCache.data;
     renderDashboardSummary(summary, sched);
+    renderSystemInfo(sysinfo);
     return;
   }
   try {
-    const [summary, sched] = await Promise.all([
+    const [summary, sched, sysinfo] = await Promise.all([
       api('GET', '/api/dashboard/summary'),
-      api('GET', '/api/scheduler/status')
+      api('GET', '/api/scheduler/status'),
+      api('GET', '/api/system/info')
     ]);
     _dashSummaryCache.data = summary;
     _dashSummaryCache.ts = now;
     renderDashboardSummary(summary, sched);
+    renderSystemInfo(sysinfo);
     updateLastRefreshed();
     applyCollapseStates();
   } catch (e) {
@@ -827,7 +1020,8 @@ document.getElementById('quickadd-form').addEventListener('submit', function (e)
 });
 
 function renderDashboardSummary(summary, sched) {
-  const { full_stats: fStats, ssl_stats: sStats, full_count, ssl_count, reachable, total, ssl_expiring, domain_expiring, expiry_buckets, last_check, snapshots } = summary;
+  const { full_stats: fStats, ssl_stats: sStats, full_count, ssl_count, reachable, total, ssl_expiring, domain_expiring, expiry_buckets, last_check, snapshots, webapp_stats } = summary;
+  const wStats = webapp_stats || { up: 0, down: 0, slow: 0, unknown: 0, total: 0 };
 
   document.getElementById('dash-counts').textContent = `${full_count} domains + ${ssl_count} SSL`;
 
@@ -839,19 +1033,23 @@ function renderDashboardSummary(summary, sched) {
   setHealth('dash-domain-health', domainPct);
   setHealth('dash-ssl-health', sslPct);
   setHealth('dash-reachable', reachPct);
+  const webappPct = wStats.total > 0 ? Math.round((wStats.up / wStats.total) * 100) : 0;
+  setHealth('dash-webapp-health', webappPct);
 
   // Changed indicator
   if (_prevHealth !== null) {
     const dDiff = domainPct - _prevHealth.domain;
     const sDiff = sslPct - _prevHealth.ssl;
+    const wDiff = webappPct - (_prevHealth.webapp || 0);
     const parts = [];
     if (dDiff !== 0) parts.push(`Domain health <span class="${dDiff > 0 ? 'chg-up' : 'chg-down'}">${dDiff > 0 ? '+' : ''}${dDiff}%</span>`);
     if (sDiff !== 0) parts.push(`SSL health <span class="${sDiff > 0 ? 'chg-up' : 'chg-down'}">${sDiff > 0 ? '+' : ''}${sDiff}%</span>`);
+    if (wDiff !== 0) parts.push(`API health <span class="${wDiff > 0 ? 'chg-up' : 'chg-down'}">${wDiff > 0 ? '+' : ''}${wDiff}%</span>`);
     const el = document.getElementById('dash-changed');
     if (parts.length > 0) { el.innerHTML = 'Since last check: ' + parts.join(', '); el.classList.add('visible'); }
     else { el.classList.remove('visible'); }
   }
-  _prevHealth = { domain: domainPct, ssl: sslPct };
+  _prevHealth = { domain: domainPct, ssl: sslPct, webapp: webappPct };
 
   // Stats with count-up
   const animStat = (id, v) => animateCount(document.getElementById(id), v);
@@ -867,8 +1065,12 @@ function renderDashboardSummary(summary, sched) {
   animStat('dash-ssl-danger', sStats.expired);
   animStat('dash-ssl-error', sStats.error);
   animStat('dash-ssl-pending', sStats.pending);
+  animStat('dash-webapp-total', wStats.total);
+  animStat('dash-webapp-up', wStats.up);
+  animStat('dash-webapp-down', wStats.down + wStats.slow);
+  animStat('dash-webapp-unknown', wStats.unknown);
 
-  const issueCount = fStats.expired + fStats.error + sStats.expired + sStats.error;
+  const issueCount = fStats.expired + fStats.error + sStats.expired + sStats.error + wStats.down + wStats.slow;
   document.getElementById('hero-issue-count').textContent = issueCount;
   document.getElementById('hero-next-check').textContent = sched && sched.next_run ? formatCountdownText(sched.next_run) : 'Not scheduled';
   document.getElementById('hero-scheduler-note').textContent = sched && sched.next_run ? `Next run in ${formatDuration(new Date(sched.next_run) - Date.now())}` : 'Scheduler active — waiting for next run.';
@@ -878,6 +1080,361 @@ function renderDashboardSummary(summary, sched) {
   renderExpiringList('ssl-expiring-list', ssl_expiring);
   renderExpiringList('domain-expiring-list', domain_expiring);
   renderExpiryBuckets(expiry_buckets);
+}
+
+function formatUptime(seconds) {
+  var d = Math.floor(seconds / 86400);
+  var h = Math.floor((seconds % 86400) / 3600);
+  var m = Math.floor((seconds % 3600) / 60);
+  var parts = [];
+  if (d > 0) parts.push(d + 'd');
+  if (h > 0) parts.push(h + 'h');
+  if (m > 0) parts.push(m + 'm');
+  if (parts.length === 0) parts.push('0m');
+  return parts.join(' ');
+}
+
+function renderSystemInfo(info) {
+  var tbody = document.getElementById('sysinfo-table');
+  if (!tbody) return;
+  var rows = [
+    ['Version', escHtml(info.version)],
+    ['Uptime', formatUptime(info.uptime_seconds)],
+    ['Started at', info.app_started_at],
+    ['API response time', info.api_response_time_ms + 'ms'],
+    ['Total domains', info.total_domains],
+    ['Total web apps', info.total_webapps],
+    ['Total users', info.total_users],
+    ['Scheduler', info.scheduler_active ? 'Active' : 'Idle'],
+  ];
+  tbody.innerHTML = rows.map(function (r) {
+    return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>';
+  }).join('');
+}
+
+// ─── Web Apps ──────────────────────────────────────────────────
+let _webappsCache = null;
+let _webappViewMode = 'cards';
+let _webappFilter = 'all';
+let _webappSort = { key: 'name', dir: 1 };
+let _webappPagination = { page: 0, size: 25 };
+let _selectedWebapps = new Set();
+let _webappGroupByStatus = false;
+
+function escUrl(u) {
+  return escHtml(u.length > 60 ? u.slice(0, 57) + '...' : u);
+}
+
+function openWebAppDetail(wa) {
+  var modal = document.getElementById('webapp-detail-modal');
+  document.getElementById('webapp-detail-title').textContent = wa.name || wa.url;
+  var total = wa.total_checks || 0;
+  var uptimePct = total ? Math.round((wa.successful_checks || 0) / total * 100) + '%' : '—';
+  document.getElementById('detail-wa-status').textContent = (wa.status || 'unknown').toUpperCase();
+  document.getElementById('detail-wa-rt').textContent = wa.response_time_ms != null ? wa.response_time_ms + 'ms' : '—';
+  document.getElementById('detail-wa-code').textContent = wa.last_status_code || '—';
+  document.getElementById('detail-wa-uptime').textContent = uptimePct;
+  document.getElementById('detail-wa-total').textContent = total;
+  var interval = wa.check_interval || 300;
+  document.getElementById('detail-wa-interval').textContent = interval >= 3600 ? Math.round(interval / 3600) + 'h' : interval >= 60 ? Math.round(interval / 60) + 'm' : interval + 's';
+  document.getElementById('detail-wa-checked').textContent = wa.last_checked ? relativeTime(wa.last_checked) : 'Never';
+  document.getElementById('detail-wa-method').textContent = wa.method || 'GET';
+
+  var sparkEl = document.getElementById('detail-wa-spark');
+  sparkEl.innerHTML = 'Loading...';
+  var historyEl = document.getElementById('detail-wa-history');
+  historyEl.innerHTML = '';
+
+  api('GET', '/api/webapps/' + wa.id + '/results?days=7').then(function (data) {
+    var rts = data.filter(function (d) { return d.response_time_ms != null; }).map(function (d) { return d.response_time_ms; });
+    if (rts.length < 2) {
+      sparkEl.innerHTML = '<span class="text-muted">Not enough data</span>';
+    } else {
+      var w = sparkEl.offsetWidth || 400;
+      var h = 80;
+      var max = Math.max.apply(null, rts);
+      var min = Math.min.apply(null, rts);
+      var range = max - min || 1;
+      var points = rts.map(function (v, i) {
+        var x = (i / (rts.length - 1)) * w;
+        var y = h - ((v - min) / range) * (h - 4) - 2;
+        return x + ',' + y;
+      }).join(' ');
+      var color = getComputedStyle(document.body).getPropertyValue('--primary').trim() || '#3b82f6';
+      sparkEl.innerHTML = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" style="display:block;width:100%;height:80px">' +
+        '<polyline fill="none" stroke="' + color + '" stroke-width="2" points="' + points + '"/>' +
+        '</svg>';
+    }
+    historyEl.innerHTML = data.slice(-20).reverse().map(function (d) {
+      var st = d.status || 'unknown';
+      var cls = st === 'up' ? 'healthy' : st === 'down' ? 'expired' : st === 'slow' ? 'warning' : 'pending';
+      var rt = d.response_time_ms != null ? d.response_time_ms + 'ms' : '—';
+      var code = d.status_code || '—';
+      return '<div class="log-row" style="display:flex;gap:12px;padding:4px 0;font-size:12px;border-bottom:1px solid var(--border)">' +
+        '<span class="domain-badge status-badge ' + cls + '" style="flex-shrink:0">' + st.toUpperCase() + '</span>' +
+        '<span style="flex:1">Code: ' + code + '</span>' +
+        '<span style="width:80px;text-align:right">' + rt + '</span>' +
+        '<span class="text-muted" style="width:140px;text-align:right">' + relativeTime(d.checked_at) + '</span>' +
+        '</div>';
+    }).join('') || '<span class="text-muted">No history</span>';
+  }).catch(function () { sparkEl.innerHTML = '<span class="text-muted">Failed to load</span>'; });
+
+  modal.classList.add('open');
+}
+
+function loadWebApps(force) {
+  if (force) _webappSparklineCache = {};
+  var path = '/api/webapps' + (force ? '?_=' + Date.now() : '');
+  api('GET', path).then(function (apps) {
+    _webappsCache = apps;
+    renderWebApps(apps);
+    var empty = document.getElementById('empty-state-webapp');
+    if (empty) empty.style.display = apps.length ? 'none' : '';
+  }).catch(function (e) { toast(e.message, 'error'); });
+}
+
+function renderWebApps(apps) {
+  renderWebAppStats(apps);
+  applyWebAppFilters(apps);
+}
+
+function renderWebAppStats(apps) {
+  var total = apps.length;
+  var up = apps.filter(function (a) { return a.status === 'up'; }).length;
+  var down = apps.filter(function (a) { return a.status === 'down'; }).length;
+  var slow = apps.filter(function (a) { return a.status === 'slow'; }).length;
+  var unknown = apps.filter(function (a) { return a.status === 'unknown' || !a.status; }).length;
+  var rts = apps.filter(function (a) { return a.response_time_ms != null; }).map(function (a) { return a.response_time_ms; });
+  var avg = rts.length ? Math.round(rts.reduce(function (a, b) { return a + b; }, 0) / rts.length) : '—';
+  document.getElementById('stat-webapp-total').textContent = total;
+  document.getElementById('stat-webapp-up').textContent = up;
+  document.getElementById('stat-webapp-down').textContent = down;
+  document.getElementById('stat-webapp-slow').textContent = slow;
+  document.getElementById('stat-webapp-unknown').textContent = unknown;
+  document.getElementById('stat-webapp-avg-response').textContent = avg === '—' ? '—' : avg + 'ms';
+}
+
+function applyWebAppFilters(apps) {
+  var filtered = apps;
+  var f = _webappFilter;
+  if (f !== 'all') filtered = apps.filter(function (a) { return (a.status || 'unknown') === f; });
+
+  var q = (document.getElementById('webapp-search').value || '').toLowerCase().trim();
+  if (q) filtered = filtered.filter(function (a) {
+    return (a.name || '').toLowerCase().indexOf(q) !== -1 ||
+           (a.url || '').toLowerCase().indexOf(q) !== -1;
+  });
+
+  var s = _webappSort;
+  filtered.sort(function (a, b) {
+    var va, vb;
+    if (s.key === 'name') { va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase(); }
+    else if (s.key === 'url') { va = (a.url || '').toLowerCase(); vb = (b.url || '').toLowerCase(); }
+    else if (s.key === 'status') { va = a.status || 'unknown'; vb = b.status || 'unknown'; }
+    else if (s.key === 'response_time') { va = a.response_time_ms || 999999; vb = b.response_time_ms || 999999; }
+    else if (s.key === 'uptime_pct') {
+      var ta = a.total_checks || 0, tb = b.total_checks || 0;
+      va = ta ? ((a.successful_checks || 0) / ta) : 0;
+      vb = tb ? ((b.successful_checks || 0) / tb) : 0;
+    }
+    else if (s.key === 'checked') {
+      va = a.last_checked || ''; vb = b.last_checked || '';
+      if (va < vb) return -1 * s.dir; if (va > vb) return 1 * s.dir; return 0;
+    }
+    if (va < vb) return -1 * s.dir; if (va > vb) return 1 * s.dir; return 0;
+  });
+
+  document.getElementById('webapp-result').textContent = 'Showing ' + filtered.length + ' web apps';
+  var clearBtn = document.querySelector('[data-action="clear-webapp-filters"]');
+  if (clearBtn) clearBtn.style.display = (f !== 'all' || q) ? '' : 'none';
+
+  renderWebAppPagination(filtered);
+  if (_webappViewMode === 'table') renderWebAppTable(filtered);
+  else renderWebAppCards(filtered);
+}
+
+function renderWebAppCardHtml(a) {
+  var st = a.status || 'unknown';
+  var cls = st === 'up' ? 'healthy' : st === 'down' ? 'expired' : st === 'slow' ? 'warning' : 'pending';
+  var rt = a.response_time_ms != null ? a.response_time_ms + 'ms' : '—';
+  var code = a.last_status_code || '—';
+  var checked = a.last_checked ? relativeTime(a.last_checked) : 'Never';
+  var total = a.total_checks || 0;
+  var uptimePct = total ? Math.round((a.successful_checks || 0) / total * 100) + '%' : '—';
+  var paused = a.is_active === 0 || a.is_active === false;
+  return '<div class="domain-card' + (_selectedWebapps.has(a.id) ? ' selected' : '') + (paused ? ' paused' : '') + '" data-webapp-id="' + a.id + '">' +
+    '<label class="bulk-check"><input type="checkbox" class="webapp-select" value="' + a.id + '"' + (_selectedWebapps.has(a.id) ? ' checked' : '') + '></label>' +
+    '<div class="card-body' + (paused ? ' opacity-50' : '') + '" data-action="webapp-check-now" data-id="' + a.id + '">' +
+    '<div class="card-top">' +
+    '<span class="domain-badge status-badge ' + cls + '">' + st.toUpperCase() + (paused ? ' (PAUSED)' : '') + '</span>' +
+    '<strong class="card-url">' + escHtml(a.name || a.url) + '</strong>' +
+    '<span class="card-time">' + escUrl(a.url) + '</span>' +
+    '</div>' +
+    '<div class="card-meta"><span>Response: ' + rt + '</span><span>HTTP ' + code + '</span><span>Uptime: ' + uptimePct + '</span><span>Checked: ' + checked + '</span></div>' +
+    '<div class="webapp-sparkline" id="spark-wa-' + a.id + '" style="height:20px;margin-top:4px"></div>' +
+    '</div>' +
+    '<div class="card-actions">' +
+    '<button class="btn btn-sm btn-secondary" data-action="webapp-check-now" data-id="' + a.id + '">Check Now</button>' +
+    '<div class="kebab" data-action="webapp-menu" data-id="' + a.id + '"><span>&#8942;</span><div class="kebab-dropdown">' +
+    '<button data-action="webapp-toggle-active" data-id="' + a.id + '">' + (paused ? 'Resume' : 'Pause') + '</button>' +
+    '<button data-action="webapp-detail" data-id="' + a.id + '">View Details</button>' +
+    '<button data-action="webapp-edit" data-id="' + a.id + '">Edit</button>' +
+    '<button data-action="webapp-delete" data-id="' + a.id + '">Delete</button>' +
+    '</div></div></div></div>';
+}
+
+function renderWebAppCards(apps) {
+  var container = document.getElementById('webapp-list');
+  var pg = _webappPagination;
+  var start = pg.page * pg.size;
+  var page = apps.slice(start, start + pg.size);
+
+  if (page.length === 0 && apps.length > 0) {
+    pg.page = Math.max(0, Math.ceil(apps.length / pg.size) - 1);
+    start = pg.page * pg.size;
+    page = apps.slice(start, start + pg.size);
+  }
+
+  if (page.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>No web apps match your filters.</p></div>';
+    updateWebappBulkToolbar();
+    return;
+  }
+
+  if (_webappGroupByStatus) {
+    var order = ['up', 'down', 'slow', 'unknown'];
+    var groups = {};
+    order.forEach(function (s) { groups[s] = []; });
+    page.forEach(function (a) {
+      var st = a.status || 'unknown';
+      if (!groups[st]) groups[st] = [];
+      groups[st].push(a);
+    });
+    var html = '';
+    order.forEach(function (st) {
+      if (!groups[st].length) return;
+      var lbl = st.charAt(0).toUpperCase() + st.slice(1);
+      html += '<div class="status-group">' +
+        '<div class="status-group-header" data-action="toggle-group" data-key="wa-' + st + '">' +
+        '<span class="chevron">&#9660;</span>' +
+        '<span class="status-label">' + lbl + '</span>' +
+        '<span class="status-group-count">(' + groups[st].length + ')</span></div>' +
+        '<div class="status-group-body">' +
+        groups[st].map(function (a) { return renderWebAppCardHtml(a); }).join('') +
+        '</div></div>';
+    });
+    container.innerHTML = html;
+  } else {
+    container.innerHTML = page.map(function (a) { return renderWebAppCardHtml(a); }).join('');
+  }
+
+  updateWebappBulkToolbar();
+  page.forEach(function (a) {
+    if (a.id && a.status) loadWebappSparkline(a.id);
+  });
+}
+
+function renderWebAppTable(apps) {
+  var tbody = document.getElementById('webapp-table-body');
+  var pg = _webappPagination;
+  var start = pg.page * pg.size;
+  var page = apps.slice(start, start + pg.size);
+
+  if (page.length === 0 && apps.length > 0) {
+    pg.page = Math.max(0, Math.ceil(apps.length / pg.size) - 1);
+    start = pg.page * pg.size;
+    page = apps.slice(start, start + pg.size);
+  }
+
+  tbody.innerHTML = page.map(function (a) {
+    var st = a.status || 'unknown';
+    var cls = st === 'up' ? 'healthy' : st === 'down' ? 'expired' : st === 'slow' ? 'warning' : 'pending';
+    var rt = a.response_time_ms != null ? a.response_time_ms + 'ms' : '—';
+    var code = a.last_status_code || '—';
+    var checked = a.last_checked ? relativeTime(a.last_checked) : 'Never';
+    var sel = _selectedWebapps.has(a.id) ? ' class="selected"' : '';
+    var total = a.total_checks || 0;
+    var uptimePct = total ? Math.round((a.successful_checks || 0) / total * 100) + '%' : '—';
+    var paused = a.is_active === 0 || a.is_active === false;
+    return '<tr' + sel + '>' +
+      '<td class="col-checkbox"><input type="checkbox" class="webapp-select" value="' + a.id + '"' + (_selectedWebapps.has(a.id) ? ' checked' : '') + '></td>' +
+      '<td class="col-name">' + escHtml(a.name) + (paused ? ' <span class="text-muted">(paused)</span>' : '') + '</td>' +
+      '<td class="col-url" title="' + escHtml(a.url) + '">' + escUrl(a.url) + '</td>' +
+      '<td class="col-status"><span class="domain-badge status-badge ' + cls + '">' + st.toUpperCase() + '</span></td>' +
+      '<td class="col-response">' + rt + '</td>' +
+      '<td class="col-code">' + code + '</td>' +
+      '<td class="col-uptime">' + uptimePct + '</td>' +
+      '<td class="col-checked">' + checked + '</td>' +
+      '<td class="col-actions">' +
+      '<button class="btn btn-sm btn-secondary" data-action="webapp-check-now" data-id="' + a.id + '">Check</button>' +
+      '<div class="kebab" data-action="webapp-menu" data-id="' + a.id + '"><span>&#8942;</span><div class="kebab-dropdown">' +
+      '<button data-action="webapp-toggle-active" data-id="' + a.id + '">' + (paused ? 'Resume' : 'Pause') + '</button>' +
+      '<button data-action="webapp-detail" data-id="' + a.id + '">View Details</button>' +
+      '<button data-action="webapp-edit" data-id="' + a.id + '">Edit</button>' +
+      '<button data-action="webapp-delete" data-id="' + a.id + '">Delete</button>' +
+      '</div></div></td></tr>';
+  }).join('') || '<tr><td colspan="9" class="empty-state"><p>No web apps match your filters.</p></td></tr>';
+  updateWebappBulkToolbar();
+}
+
+function renderWebAppPagination(apps) {
+  var pg = _webappPagination;
+  var total = apps.length;
+  var pages = Math.ceil(total / pg.size) || 1;
+  if (pg.page >= pages) pg.page = pages - 1;
+  var start = pg.page * pg.size;
+  var end = Math.min(start + pg.size, total);
+  var wrapper = document.getElementById('pagination-webapp');
+  if (total <= pg.size) { wrapper.style.display = 'none'; return; }
+  wrapper.style.display = '';
+  document.getElementById('page-from-webapp').textContent = total ? start + 1 : 0;
+  document.getElementById('page-to-webapp').textContent = end;
+  document.getElementById('page-total-webapp').textContent = total;
+  document.getElementById('page-first-webapp').disabled = pg.page === 0;
+  document.getElementById('page-prev-webapp').disabled = pg.page === 0;
+  document.getElementById('page-next-webapp').disabled = pg.page >= pages - 1;
+  document.getElementById('page-last-webapp').disabled = pg.page >= pages - 1;
+}
+
+function updateWebappBulkToolbar() {
+  var count = _selectedWebapps.size;
+  var tb = document.getElementById('webapp-bulk-toolbar');
+  if (!tb) return;
+  tb.style.display = count > 0 ? '' : 'none';
+  document.getElementById('webapp-bulk-count').textContent = count + ' selected';
+
+  // Check all checkbox sync
+  var firstCheck = document.querySelector('.webapp-select');
+  var allCheck = document.getElementById('select-all-webapp');
+  if (allCheck && firstCheck) {
+    var checks = document.querySelectorAll('.webapp-select');
+    var allChecked = true;
+    checks.forEach(function (c) { if (!c.checked) allChecked = false; });
+    allCheck.checked = allChecked && checks.length > 0;
+  }
+}
+
+function openWebAppModal(app) {
+  var modal = document.getElementById('webapp-modal');
+  document.getElementById('webapp-id').value = app ? app.id : '';
+  document.getElementById('webapp-modal-title').textContent = app ? 'Edit Web App' : 'Add Web App';
+  document.getElementById('webapp-name').value = app ? app.name : '';
+  document.getElementById('webapp-url').value = app ? app.url : '';
+  document.getElementById('webapp-method').value = app ? (app.method || 'GET') : 'GET';
+  document.getElementById('webapp-expected-status').value = app ? (app.expected_status || 200) : 200;
+  document.getElementById('webapp-expected-body').value = app ? (app.expected_body || '') : '';
+  document.getElementById('webapp-timeout').value = app ? (app.timeout || 10) : 10;
+  document.getElementById('webapp-check-interval').value = app ? (app.check_interval || 300) : 300;
+  document.getElementById('webapp-headers').value = app && app.headers ? (typeof app.headers === 'string' ? app.headers : JSON.stringify(app.headers, null, 2)) : '';
+  document.getElementById('webapp-body').value = app ? (app.body || '') : '';
+  document.getElementById('webapp-notes').value = app ? (app.notes || '') : '';
+  document.getElementById('webapp-notify-down').checked = app ? (app.notify_on_down ? true : false) : true;
+  document.getElementById('webapp-notify-recovery').checked = app ? (app.notify_on_recovery ? true : false) : true;
+  modal.classList.add('open');
+}
+
+function closeWebAppModal() {
+  document.getElementById('webapp-modal').classList.remove('open');
 }
 
 function setHealth(prefix, pct) {
@@ -3466,6 +4023,40 @@ function formatLogType(type) {
   return String(type || 'info').replace(/_/g, ' ');
 }
 
+var _webappSparklineCache = {};
+
+function loadWebappSparkline(id) {
+  if (_webappSparklineCache[id]) {
+    renderWebappSparkline(id, _webappSparklineCache[id]);
+    return;
+  }
+  api('GET', '/api/webapps/' + id + '/results?days=7').then(function (data) {
+    _webappSparklineCache[id] = data;
+    renderWebappSparkline(id, data);
+  }).catch(function () {});
+}
+
+function renderWebappSparkline(id, data) {
+  var el = document.getElementById('spark-wa-' + id);
+  if (!el) return;
+  var rts = data.filter(function (d) { return d.response_time_ms != null; }).map(function (d) { return d.response_time_ms; });
+  if (rts.length < 2) { el.innerHTML = ''; return; }
+  var w = el.offsetWidth || 120;
+  var h = 20;
+  var max = Math.max.apply(null, rts);
+  var min = Math.min.apply(null, rts);
+  var range = max - min || 1;
+  var points = rts.map(function (v, i) {
+    var x = (i / (rts.length - 1)) * w;
+    var y = h - ((v - min) / range) * (h - 2) - 1;
+    return x + ',' + y;
+  }).join(' ');
+  var color = getComputedStyle(document.body).getPropertyValue('--primary').trim() || '#3b82f6';
+  el.innerHTML = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" style="display:block">' +
+    '<polyline fill="none" stroke="' + color + '" stroke-width="1.5" points="' + points + '"/>' +
+    '</svg>';
+}
+
 function renderLogSummary(summary) {
   const set = (id, value) => {
     const el = document.getElementById(id);
@@ -3474,7 +4065,9 @@ function renderLogSummary(summary) {
   const errors = Object.keys(summary).reduce((sum, key) => key.includes('error') ? sum + summary[key] : sum, 0);
   set('log-total-count', summary.total);
   set('log-check-count', summary.check);
+  set('log-webapp-check-count', summary.webapp_check);
   set('log-alert-count', summary.alert);
+  set('log-webapp-alert-count', summary.webapp_alert);
   set('log-error-count', errors);
 }
 

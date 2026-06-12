@@ -33,8 +33,12 @@ import backup
 import email_templates
 import scheduler as sched_mod
 from checker import check_domain
+import webapp_checker
 from alert import send_alerts, test_smtp, send_check_complete_summary, _resolve_smtp_config
+from webhook import send_webhook_alerts
 from scheduler import start_scheduler, get_next_scheduled_check
+import csv
+from io import StringIO
 
 # ─── Logging ──────────────────────────────────────────────────
 log_formatter = logging.Formatter('%(asctime)s [%(levelname)s] [%(request_id)s] %(name)s: %(message)s')
@@ -55,6 +59,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 logging.getLogger("whois").setLevel(logging.WARNING)
+
+# ─── Version & Uptime ────────────────────────────────────────
+VERSION = '1.0.0'
+APP_START_TIME = time.time()
 
 # ─── Request ID for traceability ──────────────────────────────
 _request_id_var: ContextVar[str] = ContextVar('request_id', default='')
@@ -768,11 +776,277 @@ def check_all():
         _release_check_run()
 
 
+# ─── Web Apps ──────────────────────────────────────────────────
+@app.route('/api/webapps', methods=['GET'])
+@login_required
+def list_webapps():
+    apps = models.get_webapps()
+    return jsonify(apps)
+
+
+@app.route('/api/webapps', methods=['POST'])
+@admin_required
+@csrf_required
+@json_body('name', 'url')
+def create_webapp(data):
+    result = models.add_webapp(
+        name=data['name'].strip(),
+        url=data['url'].strip(),
+        method=data.get('method', 'GET'),
+        expected_status=data.get('expected_status', 200),
+        expected_body=data.get('expected_body'),
+        timeout=data.get('timeout', 10),
+        headers=json.dumps(data.get('headers', {})) if data.get('headers') else None,
+        body=data.get('body'),
+        check_interval=data.get('check_interval', 300),
+        notify_on_down=data.get('notify_on_down', True),
+        notify_on_recovery=data.get('notify_on_recovery', True),
+        notes=data.get('notes', ''),
+    )
+    if not result.get('ok'):
+        return api_error(result.get('error', 'Failed to create webapp'), 400)
+    return jsonify(result), 201
+
+
+@app.route('/api/webapps/<int:webapp_id>', methods=['PUT'])
+@admin_required
+@csrf_required
+def update_webapp(webapp_id):
+    app_data = models.get_webapp(webapp_id)
+    if not app_data:
+        return api_error('Webapp not found', 404)
+    data = request.get_json(silent=True) or {}
+    allowed_keys = ('name', 'url', 'method', 'expected_status', 'expected_body',
+                    'timeout', 'check_interval', 'notify_on_down', 'notify_on_recovery',
+                    'notes', 'is_active')
+    kwargs = {}
+    if 'headers' in data:
+        kwargs['headers'] = json.dumps(data['headers']) if isinstance(data['headers'], dict) else data['headers']
+    for k in allowed_keys:
+        if k in data:
+            kwargs[k] = data[k]
+    models.update_webapp(webapp_id, **kwargs)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/webapps/<int:webapp_id>', methods=['DELETE'])
+@admin_required
+@csrf_required
+def delete_webapp(webapp_id):
+    app_data = models.get_webapp(webapp_id)
+    if not app_data:
+        return api_error('Webapp not found', 404)
+    models.delete_webapp(webapp_id)
+    models.add_log('delete', f'Deleted webapp: {app_data["name"]} ({app_data["url"]})', username=current_username())
+    return jsonify({'ok': True})
+
+
+@app.route('/api/webapps/bulk-delete', methods=['POST'])
+@admin_required
+@csrf_required
+@json_body('ids')
+def bulk_delete_webapps(data):
+    for wid in data['ids']:
+        app_data = models.get_webapp(wid)
+        if app_data:
+            models.delete_webapp(wid)
+    return jsonify({'ok': True})
+
+
+def run_check_for_webapp(wa, retries=1):
+    for attempt in range(retries + 1):
+        try:
+            result = webapp_checker.check_webapp(wa)
+            result['webapp_id'] = wa['id']
+            result['name'] = wa['name']
+            result['url'] = wa['url']
+            if result['status'] != 'down' or attempt == retries:
+                return result
+            logger.info("Retrying webapp %s (attempt %d/%d)", wa['url'], attempt + 1, retries + 1)
+        except Exception as e:
+            if attempt == retries:
+                logger.exception("Unexpected error checking webapp %s", wa['url'])
+                return {
+                    'webapp_id': wa['id'], 'name': wa['name'], 'url': wa['url'],
+                    'status': 'down', 'error': str(e), 'success': False,
+                    'response_time_ms': None, 'status_code': None,
+                    'uptime_count': 0, 'downtime_count': 1,
+                }
+
+
+def _maybe_send_webapp_alert(wa, result, settings, previous_status=None):
+    if previous_status is None:
+        return
+    new_status = result['status']
+    is_down = new_status in ('down', 'error')
+    was_up = previous_status in ('up', 'slow')
+    is_up = new_status in ('up', 'slow')
+    was_down = previous_status in ('down', 'error', 'unknown')
+
+    should_alert = False
+    if is_down and was_up and wa.get('notify_on_down'):
+        should_alert = True
+    elif is_up and was_down and wa.get('notify_on_recovery'):
+        should_alert = True
+
+    if not should_alert:
+        return
+
+    last = models.parse_dt(wa.get('last_alerted'))
+    if last and (models.timezone_now() - last).total_seconds() < models.ALERT_COOLDOWN_SECONDS:
+        return
+
+    settings = settings or models.get_settings()
+    try:
+        errors = send_alerts(wa['name'] + ' (' + wa['url'] + ')',
+                             new_status, None, None, settings, domain_data=dict(wa))
+    except Exception as e:
+        errors = [str(e)]
+    try:
+        we = send_webhook_alerts(wa['name'] + ' (' + wa['url'] + ')',
+                                 new_status, None, None, settings, domain_data=dict(wa))
+        errors.extend(we)
+    except Exception as e:
+        errors.append(str(e))
+
+    if errors:
+        for e in errors:
+            models.add_log('webapp_alert_error', f'Webapp alert failed for {wa["name"]}: {e}')
+    else:
+        models.add_log('webapp_alert', f'Webapp alert sent for {wa["name"]}: {new_status}')
+        models.update_webapp_last_alerted(wa['id'])
+
+
+@app.route('/api/webapps/<int:webapp_id>/check', methods=['POST'])
+@admin_required
+@csrf_required
+def check_webapp_manual(webapp_id):
+    wa = models.get_webapp(webapp_id)
+    if not wa:
+        return api_error('Webapp not found', 404)
+    previous_status = wa.get('status')
+    result = run_check_for_webapp(wa, retries=1)
+    models.save_webapp_check(webapp_id, result)
+    models.save_webapp_check_result(webapp_id, result)
+    models.add_log('webapp_check', f'Manual check: {wa["name"]} - {result["status"]}', username=current_username())
+    settings = models.get_settings()
+    _maybe_send_webapp_alert(wa, result, settings, previous_status)
+    return jsonify(result)
+
+
+@app.route('/api/webapps/check-all', methods=['POST'])
+@admin_required
+@csrf_required
+def check_all_webapps():
+    apps = models.get_webapps()
+    if not apps:
+        return jsonify({'message': 'No webapps to check', 'results': []})
+    settings = models.get_settings()
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futures = {pool.submit(run_check_for_webapp, a, 1): a for a in apps}
+        results = []
+        for future in as_completed(futures):
+            r = future.result()
+            results.append(r)
+    for r in results:
+        wa = next((a for a in apps if a['id'] == r['webapp_id']), None)
+        if wa:
+            models.save_webapp_check(wa['id'], r)
+            models.save_webapp_check_result(wa['id'], r)
+            models.add_log('webapp_check', f'Auto check: {wa["name"]} - {r["status"]}', username=current_username())
+            previous_status = wa.get('status')
+            _maybe_send_webapp_alert(wa, r, settings, previous_status)
+    return jsonify({'message': f'Checked {len(results)} webapps', 'results': results})
+
+
+@app.route('/api/webapps/<int:webapp_id>/results', methods=['GET'])
+@login_required
+def webapp_results(webapp_id):
+    days = request.args.get('days', 7, type=int)
+    history = models.get_webapp_check_history(webapp_id, days)
+    return jsonify(history)
+
+
+@app.route('/api/webapps/stats', methods=['GET'])
+@login_required
+def webapp_stats():
+    return jsonify(models.get_webapp_stats())
+
+
+@app.route('/api/webapps/export/csv', methods=['GET'])
+@login_required
+def webapp_export_csv():
+    apps = models.get_webapps()
+    si = StringIO()
+    writer = csv.writer(si)
+    writer.writerow(['Name', 'URL', 'Method', 'Status', 'Response Time (ms)',
+                     'Status Code', 'Uptime %', 'Total Checks', 'Last Checked', 'Last Error'])
+    for a in apps:
+        total = a.get('total_checks', 0) or 1
+        uptime_pct = round((a.get('successful_checks', 0) / total) * 100, 1) if total else 0
+        writer.writerow([
+            a['name'], a['url'], a.get('method', 'GET'),
+            a.get('status', 'unknown'), a.get('response_time_ms', ''),
+            a.get('last_status_code', ''), uptime_pct,
+            a.get('total_checks', 0), a.get('last_checked', ''),
+            a.get('last_error', '')
+        ])
+    resp = make_response(si.getvalue())
+    resp.headers['Content-Type'] = 'text/csv'
+    resp.headers['Content-Disposition'] = 'attachment; filename=webapps.csv'
+    return resp
+
+
+@app.route('/api/webapps/status/public', methods=['GET'])
+def webapp_public_status():
+    apps = models.get_webapps()
+    data = []
+    for a in apps:
+        data.append({
+            'name': a['name'],
+            'url': a['url'],
+            'status': a.get('status', 'unknown'),
+            'response_time_ms': a.get('response_time_ms'),
+            'last_checked': a.get('last_checked'),
+        })
+    return jsonify({'monitored': len(data), 'services': data})
+
+
+@app.route('/api/logs/webapp', methods=['GET'])
+@login_required
+def webapp_logs():
+    limit = request.args.get('limit', 50, type=int)
+    offset = request.args.get('offset', 0, type=int)
+    log_type = request.args.get('type')
+    rows = models.get_logs(limit=limit, offset=offset, log_type=log_type)
+    total = models.get_logs_count(log_type=log_type)
+    return jsonify({'logs': rows, 'total': total})
+
+
 # ─── Scheduler Status ──────────────────────────────────────────
 @app.route('/api/scheduler/status', methods=['GET'])
 @login_required
 def scheduler_status():
     return jsonify({'next_run': get_next_scheduled_check()})
+
+
+# ─── System Info ────────────────────────────────────────────────
+@app.route('/api/system/info', methods=['GET'])
+@login_required
+def system_info():
+    t0 = time.perf_counter()
+    info = {
+        'version': VERSION,
+        'uptime_seconds': int(time.time() - APP_START_TIME),
+        'app_started_at': datetime.fromtimestamp(APP_START_TIME).strftime('%Y-%m-%d %H:%M:%S'),
+        'total_users': models.count_users(),
+        'total_domains': models.count_domains(),
+        'total_webapps': models.count_webapps(),
+        'scheduler_active': get_next_scheduled_check() is not None,
+    }
+    elapsed = int((time.perf_counter() - t0) * 1000)
+    info['api_response_time_ms'] = elapsed
+    return jsonify(info)
 
 
 # ─── Cert Details ──────────────────────────────────────────────
@@ -1326,6 +1600,39 @@ def check_all_background():
         _release_check_run()
 
 
+def check_webapps_background():
+    try:
+        with app.app_context():
+            apps = models.get_webapps()
+            now = models.timezone_now()
+            due = []
+            for a in apps:
+                if not a.get('is_active'):
+                    continue
+                interval = a.get('check_interval', 300)
+                last = models.parse_dt(a.get('last_checked'))
+                if last and (now - last).total_seconds() < interval:
+                    continue
+                due.append(a)
+            if not due:
+                return
+            settings = models.get_settings()
+            with ThreadPoolExecutor(max_workers=10) as pool:
+                futures = {pool.submit(run_check_for_webapp, wa, 1): wa for wa in due}
+                for future in as_completed(futures):
+                    r = future.result()
+                    wa = next((a for a in due if a['id'] == r['webapp_id']), None)
+                    if wa:
+                        models.save_webapp_check(wa['id'], r)
+                        models.save_webapp_check_result(wa['id'], r)
+                        models.add_log('webapp_check', f'Auto check: {wa["name"]} - {r["status"]}')
+                        previous_status = wa.get('status')
+                        _maybe_send_webapp_alert(wa, r, settings, previous_status)
+            logger.info("Scheduled webapp check: %d checked, %d due", len(due), len(due))
+    except Exception as e:
+        logger.error(f"Scheduled webapp check failed: {e}")
+
+
 # ─── Graceful shutdown ────────────────────────────────────────
 def shutdown(wait=True):
     """Graceful shutdown. Set wait=True to block until in-flight checks complete (atexit),
@@ -1357,7 +1664,7 @@ if not os.environ.get("PYTEST_VERSION"):
     import sys as _sys
     _sys.stderr.write("[vigil] Initialising scheduler at module level...\n")
     _sys.stderr.flush()
-    start_scheduler(check_all_background)
+    start_scheduler(check_all_background, check_webapps_background)
     backup.schedule_backup(sched_mod.scheduler)
     atexit.register(shutdown)
 

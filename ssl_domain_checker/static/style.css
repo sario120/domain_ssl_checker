@@ -955,6 +955,20 @@ legend { font-weight: 600; font-size: 15px; padding: 0 8px; color: var(--primary
 .sparkline-tooltip .tt-label { color: var(--text-muted); }
 .sparkline-tooltip .tt-value { font-weight: 600; }
 
+/* ─── Form checkbox row ───────────────────────────────────────── */
+.form-checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.form-checkbox-row label { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+
+/* ─── Webapp card meta row ────────────────────────────────────── */
+.card-meta { display: flex; gap: 16px; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+/* ─── Status badge ──────────────────────────────────────────── */
+.status-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.status-badge.healthy { background: var(--green-bg); color: var(--green); }
+.status-badge.expired { background: var(--red-bg); color: var(--red); }
+.status-badge.warning { background: var(--yellow-bg); color: var(--yellow); }
+.status-badge.pending { background: var(--bg-input); color: var(--text-muted); }
+
 /* ─── Changed indicator ──────────────────────────────────────── */
 .dash-changed { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; padding: 8px 12px; background: var(--bg-card); border-radius: 6px; border: 1px solid var(--border); display: none; }
 .dash-changed.visible { display: block; }
@@ -964,6 +978,13 @@ legend { font-weight: 600; font-size: 15px; padding: 0 8px; color: var(--primary
 /* ─── Scheduler pulse ────────────────────────────────────────── */
 .scheduler-status .dot.running { animation: pulse-dot 1s ease-in-out infinite; }
 @keyframes pulse-dot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.3); } }
+
+/* ─── System Info ────────────────────────────────────────────── */
+.sysinfo-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sysinfo-table td { padding: 6px 0; border-bottom: 1px solid var(--border); }
+.sysinfo-table td:first-child { color: var(--text-muted); padding-right: 12px; white-space: nowrap; }
+.sysinfo-table td:last-child { font-weight: 500; text-align: right; }
+.sysinfo-table tr:last-child td { border-bottom: none; }
 
 /* ─── Top expiring ────────────────────────────────────────────── */
 .dash-top-expiring { margin-bottom: 24px; }
@@ -1427,3 +1448,12 @@ body.dark .badge-json { background: #e65100; color: #ffcc80; }
 }
 .backup-create-pane .card-header h3, .backup-upload-pane .card-header h3, .backup-schedule-card .card-header h3 { margin: 0; font-size: 15px; }
 .backup-create-pane .card-body, .backup-upload-pane .card-body, .backup-schedule-card .card-body { padding: 16px; }
+
+.opacity-50 { opacity: 0.5; }
+.paused { opacity: 0.85; }
+.paused .domain-badge { opacity: 0.6; }
+
+.detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+.detail-stat { background: var(--bg-input); padding: 10px 12px; border-radius: 6px; }
+.detail-stat .detail-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 2px; }
+.detail-stat span:last-child { font-size: 15px; font-weight: 600; }

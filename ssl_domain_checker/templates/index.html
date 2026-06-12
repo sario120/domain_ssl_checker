@@ -15,6 +15,7 @@
       <button class="nav-tab active" data-view="dashboard">Dashboard</button>
       <button class="nav-tab" data-view="domains">Domains</button>
       <button class="nav-tab" data-view="sslcerts">SSL Certs</button>
+      <button class="nav-tab" data-view="webapps">Web Apps</button>
       <button class="nav-tab" data-view="backups">Backups</button>
       <button class="nav-tab" data-view="settings">Settings</button>
       <button class="nav-tab" data-view="logs">Logs</button>
@@ -93,6 +94,11 @@
               <span class="health-pct" id="dash-reachable-pct">—</span>
               <div class="health-bar-bg"><div class="health-bar" id="dash-reachable-bar"></div></div>
             </div>
+            <div class="dash-health">
+              <span class="health-label">API Health</span>
+              <span class="health-pct" id="dash-webapp-health-pct">—</span>
+              <div class="health-bar-bg"><div class="health-bar" id="dash-webapp-health-bar"></div></div>
+            </div>
           </div>
 
           <div class="dash-grid">
@@ -118,6 +124,15 @@
                 <div class="dash-stat pending" data-action="filter-domains" data-type="ssl_only" data-status="pending"><span class="dash-num" id="dash-ssl-pending">0</span> Pending</div>
               </div>
             </div>
+            <div class="dash-card" style="cursor:pointer" data-action="go-webapps">
+              <div class="dash-card-header">Web Apps</div>
+              <div class="dash-card-body">
+                <div class="dash-stat"><span class="dash-num" id="dash-webapp-total">0</span> total</div>
+                <div class="dash-stat healthy"><span class="dash-num" id="dash-webapp-up">0</span> Up</div>
+                <div class="dash-stat danger"><span class="dash-num" id="dash-webapp-down">0</span> Down / Slow</div>
+                <div class="dash-stat pending"><span class="dash-num" id="dash-webapp-unknown">0</span> Unknown</div>
+              </div>
+            </div>
           </div>
 
           <div class="dash-buckets" id="dash-buckets">
@@ -127,6 +142,14 @@
         </div>
 
         <div class="dash-sidebar">
+          <div class="dash-sparkline" id="dash-system-info">
+            <div class="sparkline-header collapsible-header" data-collapse="sysinfo">
+              <span class="collapse-arrow">&#9660;</span>
+              <h4>System Information</h4>
+            </div>
+            <div class="collapsible-body"><table class="sysinfo-table" id="sysinfo-table"></table></div>
+          </div>
+
           <div class="dash-sparkline" id="dash-sparkline">
             <div class="sparkline-header collapsible-header" data-collapse="sparkline">
               <span class="collapse-arrow">&#9660;</span>
@@ -357,6 +380,103 @@
           <button class="btn btn-secondary" data-action="download-template-ssl">Download import template</button>
         </div>
         <div class="empty-suggestions" id="ssl-empty-suggestions"></div>
+      </div>
+    </section>
+
+    <!-- Web Apps View -->
+    <section id="view-webapps" class="view">
+      <div class="view-header">
+        <div>
+          <h2>Web Apps</h2>
+          <p class="view-subtitle">Monitor API endpoints and web application health.</p>
+        </div>
+        <div class="header-actions">
+          <input type="text" id="webapp-search" class="domain-search-input" placeholder="Search web apps...">
+          <button class="btn btn-secondary" data-action="toggle-view-webapps" title="Switch to table view"><span class="view-toggle-icon">&#9776;</span><span class="view-toggle-label">Table</span></button>
+          <button class="btn btn-secondary" data-action="check-all-webapps">Check All</button>
+          <button class="btn btn-secondary" data-action="webapp-export-csv">Export CSV</button>
+          <button class="btn btn-primary" data-action="add-webapp">+ Add Web App</button>
+        </div>
+      </div>
+      <div class="domain-list-summary" id="webapp-summary">
+        <span id="webapp-result">Showing 0 web apps</span>
+        <button class="btn btn-sm btn-secondary" data-action="clear-webapp-filters" style="display:none">Clear filters</button>
+      </div>
+
+      <div class="domain-filters" id="webapp-filters">
+        <button class="log-filter active" data-webapp-filter="all">All</button>
+        <button class="log-filter" data-webapp-filter="up">Up</button>
+        <button class="log-filter" data-webapp-filter="down">Down</button>
+        <button class="log-filter" data-webapp-filter="slow">Slow</button>
+        <button class="log-filter" data-webapp-filter="unknown">Unknown</button>
+      </div>
+
+      <div class="bulk-toolbar" id="webapp-bulk-toolbar" style="display:none">
+        <label class="bulk-select-all"><input type="checkbox" id="select-all-webapp"> Select All</label>
+        <span id="webapp-bulk-count">0 selected</span>
+        <button class="btn btn-sm btn-secondary" data-action="webapp-bulk-check">Check Selected</button>
+        <button class="btn btn-sm btn-danger" data-action="webapp-bulk-delete">Delete Selected</button>
+        <button class="btn btn-sm btn-secondary" data-action="webapp-bulk-deselect">Clear</button>
+      </div>
+
+      <div class="sort-bar" id="sort-bar-webapp">
+        <button class="sort-btn active" data-sort="name" data-type="webapp">Name <span class="sort-arrow">&#9650;</span></button>
+        <button class="sort-btn" data-sort="url" data-type="webapp">URL</button>
+        <button class="sort-btn" data-sort="status" data-type="webapp">Status</button>
+        <button class="sort-btn" data-sort="response_time" data-type="webapp">Response Time</button>
+        <button class="sort-btn" data-sort="uptime_pct" data-type="webapp">Uptime %</button>
+        <button class="sort-btn" data-sort="checked" data-type="webapp">Last Checked</button>
+        <div class="sort-right">
+          <label class="sort-toggle"><input type="checkbox" id="webapp-group-by-status"> Group by status</label>
+          <div class="column-toggle" id="col-toggle-webapp">
+            <button class="btn btn-sm btn-secondary" data-action="toggle-columns-webapp">&#9776; Columns</button>
+            <div class="column-dropdown" id="col-dropdown-webapp" style="display:none">
+              <label class="col-check"><input type="checkbox" data-col="col-name" checked> Name</label>
+              <label class="col-check"><input type="checkbox" data-col="col-url" checked> URL</label>
+              <label class="col-check"><input type="checkbox" data-col="col-status" checked> Status</label>
+              <label class="col-check"><input type="checkbox" data-col="col-response" checked> Response Time</label>
+              <label class="col-check"><input type="checkbox" data-col="col-code" checked> Status Code</label>
+              <label class="col-check"><input type="checkbox" data-col="col-uptime" checked> Uptime %</label>
+              <label class="col-check"><input type="checkbox" data-col="col-checked" checked> Last Checked</label>
+              <label class="col-check"><input type="checkbox" data-col="col-actions" checked> Actions</label>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-secondary" data-action="refresh-webapps">&#x21bb; Refresh</button>
+        </div>
+      </div>
+
+      <div class="stats-bar" id="webapp-stats-bar">
+        <div class="stat total"><span class="stat-count" id="stat-webapp-total">0</span> Total</div>
+        <div class="stat healthy"><span class="stat-count" id="stat-webapp-up">0</span> Up</div>
+        <div class="stat danger"><span class="stat-count" id="stat-webapp-down">0</span> Down</div>
+        <div class="stat warning"><span class="stat-count" id="stat-webapp-slow">0</span> Slow</div>
+        <div class="stat pending"><span class="stat-count" id="stat-webapp-unknown">0</span> Unknown</div>
+        <div class="stat" style="border-left:1px solid var(--border);padding-left:16px;margin-left:4px"><span class="stat-count" id="stat-webapp-avg-response">—</span> Avg Response</div>
+      </div>
+      <div id="webapp-list" class="domain-list"></div>
+      <table id="webapp-table" class="domain-table" style="display:none">
+        <thead><tr><th class="col-checkbox"></th><th class="col-name" data-sort="name" data-type="webapp">Name <span class="sort-arrow"></span></th><th class="col-url" data-sort="url" data-type="webapp">URL <span class="sort-arrow"></span></th><th class="col-status" data-sort="status" data-type="webapp">Status <span class="sort-arrow"></span></th><th class="col-response" data-sort="response_time" data-type="webapp">Response Time <span class="sort-arrow"></span></th><th class="col-code" data-sort="code" data-type="webapp">Status Code <span class="sort-arrow"></span></th><th class="col-uptime" data-sort="uptime_pct" data-type="webapp">Uptime % <span class="sort-arrow"></span></th><th class="col-checked" data-sort="checked" data-type="webapp">Last Checked <span class="sort-arrow"></span></th><th class="col-actions">Actions</th></tr></thead>
+        <tbody id="webapp-table-body"></tbody>
+      </table>
+      <div class="pagination-wrapper" id="pagination-webapp" style="display:none">
+        <div class="pagination-info">Showing <span id="page-from-webapp">0</span>-<span id="page-to-webapp">0</span> of <span id="page-total-webapp">0</span></div>
+        <div class="pagination-controls">
+          <button class="btn btn-sm btn-secondary" data-action="page-first-webapp" id="page-first-webapp">&#171;</button>
+          <button class="btn btn-sm btn-secondary" data-action="page-prev-webapp" id="page-prev-webapp">&#8249;</button>
+          <select id="page-size-webapp" class="page-size-select">
+            <option value="25">25/page</option>
+            <option value="50">50/page</option>
+            <option value="100">100/page</option>
+          </select>
+          <button class="btn btn-sm btn-secondary" data-action="page-next-webapp" id="page-next-webapp">&#8250;</button>
+          <button class="btn btn-sm btn-secondary" data-action="page-last-webapp" id="page-last-webapp">&#187;</button>
+        </div>
+      </div>
+      <div id="empty-state-webapp" class="empty-state" style="display:none">
+        <p>No web apps monitored yet.</p>
+        <div class="empty-actions">
+          <button class="btn btn-primary" data-action="add-webapp">Add your first web app</button>
+        </div>
       </div>
     </section>
 
@@ -791,12 +911,16 @@
       <div class="log-summary" id="log-summary">
         <div class="log-summary-card"><span id="log-total-count">0</span>Total</div>
         <div class="log-summary-card"><span id="log-check-count">0</span>Checks</div>
+        <div class="log-summary-card"><span id="log-webapp-check-count">0</span>Web Checks</div>
         <div class="log-summary-card"><span id="log-alert-count">0</span>Alerts</div>
+        <div class="log-summary-card"><span id="log-webapp-alert-count">0</span>Web Alerts</div>
         <div class="log-summary-card attention"><span id="log-error-count">0</span>Errors</div>
       </div>
       <div class="log-filters" id="log-filters">
         <button class="log-filter active" data-log-filter="all">All</button>
         <button class="log-filter" data-log-filter="check">Checks</button>
+        <button class="log-filter" data-log-filter="webapp_check">Web App Checks</button>
+        <button class="log-filter" data-log-filter="webapp_alert">Web App Alerts</button>
         <button class="log-filter" data-log-filter="alert">Alerts</button>
         <button class="log-filter" data-log-filter="error">Errors</button>
         <button class="log-filter" data-log-filter="info">Info</button>
@@ -1015,6 +1139,109 @@
       </div>
     </div>
   </div>
+  </div>
+
+  <!-- Web App Modal -->
+  <div id="webapp-modal" class="modal">
+    <div class="modal-backdrop" data-action="close-webapp-modal"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="webapp-modal-title">Add Web App</h3>
+        <button class="modal-close" data-action="close-webapp-modal">&times;</button>
+      </div>
+      <form id="webapp-form">
+        <input type="hidden" id="webapp-id">
+        <div class="form-row">
+          <label for="webapp-name">Name</label>
+          <input type="text" id="webapp-name" placeholder="My API" required>
+        </div>
+        <div class="form-row">
+          <label for="webapp-url">URL</label>
+          <input type="text" id="webapp-url" placeholder="https://api.example.com/health" required>
+        </div>
+        <div class="form-row">
+          <label for="webapp-method">Method</label>
+          <select id="webapp-method">
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+            <option value="PATCH">PATCH</option>
+            <option value="HEAD">HEAD</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label for="webapp-expected-status">Expected Status Code</label>
+          <input type="number" id="webapp-expected-status" value="200" min="100" max="599">
+        </div>
+        <div class="form-row">
+          <label for="webapp-expected-body">Expected Body Contains</label>
+          <input type="text" id="webapp-expected-body" placeholder="Optional: substring to match in response">
+        </div>
+        <div class="form-row">
+          <label for="webapp-timeout">Timeout (seconds)</label>
+          <input type="number" id="webapp-timeout" value="10" min="1" max="120">
+        </div>
+        <div class="form-row">
+          <label for="webapp-check-interval">Check Interval (seconds)</label>
+          <select id="webapp-check-interval">
+            <option value="60">1 minute</option>
+            <option value="300" selected>5 minutes</option>
+            <option value="900">15 minutes</option>
+            <option value="1800">30 minutes</option>
+            <option value="3600">1 hour</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label for="webapp-headers">Custom Headers (JSON)</label>
+          <textarea id="webapp-headers" rows="2" placeholder='{"Authorization": "Bearer token"}'></textarea>
+        </div>
+        <div class="form-row">
+          <label for="webapp-body">Request Body (for POST)</label>
+          <textarea id="webapp-body" rows="2" placeholder='{"key": "value"}'></textarea>
+        </div>
+        <div class="form-row">
+          <label for="webapp-notes">Notes</label>
+          <textarea id="webapp-notes" rows="2" placeholder="Optional notes"></textarea>
+        </div>
+        <div class="form-row form-checkbox-row">
+          <label><input type="checkbox" id="webapp-notify-down" checked> Notify on Down</label>
+        </div>
+        <div class="form-row form-checkbox-row">
+          <label><input type="checkbox" id="webapp-notify-recovery" checked> Notify on Recovery</label>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" data-action="close-webapp-modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-save-webapp">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Webapp Detail Modal -->
+  <div id="webapp-detail-modal" class="modal">
+    <div class="modal-backdrop" data-action="close-webapp-detail"></div>
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <h3 id="webapp-detail-title">Web App Details</h3>
+        <button class="modal-close" data-action="close-webapp-detail">&times;</button>
+      </div>
+      <div class="modal-body" id="webapp-detail-body">
+        <div class="detail-grid">
+          <div class="detail-stat"><span class="detail-label">Status</span><span id="detail-wa-status"></span></div>
+          <div class="detail-stat"><span class="detail-label">Response Time</span><span id="detail-wa-rt"></span></div>
+          <div class="detail-stat"><span class="detail-label">Status Code</span><span id="detail-wa-code"></span></div>
+          <div class="detail-stat"><span class="detail-label">Uptime</span><span id="detail-wa-uptime"></span></div>
+          <div class="detail-stat"><span class="detail-label">Total Checks</span><span id="detail-wa-total"></span></div>
+          <div class="detail-stat"><span class="detail-label">Interval</span><span id="detail-wa-interval"></span></div>
+          <div class="detail-stat"><span class="detail-label">Last Checked</span><span id="detail-wa-checked"></span></div>
+          <div class="detail-stat"><span class="detail-label">Method</span><span id="detail-wa-method"></span></div>
+        </div>
+        <h4 style="margin:16px 0 8px;font-size:13px;color:var(--text-muted)">Response Time Trend (7 days)</h4>
+        <div id="detail-wa-spark" style="height:80px;width:100%"></div>
+        <h4 style="margin:16px 0 8px;font-size:13px;color:var(--text-muted)">Recent Checks</h4>
+        <div id="detail-wa-history" style="max-height:200px;overflow-y:auto"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Quick Add Modal -->
