@@ -1155,9 +1155,9 @@ function escUrl(u) {
 
 function formatDurationLong(seconds) {
   if (seconds == null) return 'N/A';
-  if (seconds < 60) return '< 1m';
+  if (seconds < 60) return seconds + 's';
   var min = Math.floor(seconds / 60);
-  if (min < 60) return min + 'm';
+  if (min < 60) return min + 'm ' + (seconds % 60) + 's';
   var hr = Math.floor(min / 60);
   if (hr < 24) return formatDurationCompact(hr, min % 60, 0, 0);
   var days = Math.floor(hr / 24);
