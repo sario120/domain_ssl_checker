@@ -190,12 +190,17 @@ body {
 
 .domain-card {
   background: var(--bg-card); border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
   border-radius: var(--radius); padding: 14px 18px;
   display: flex; align-items: flex-start; gap: 14px;
   box-shadow: var(--shadow);
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, border-left-color 0.3s;
   position: relative;
 }
+.domain-card.card-healthy { border-left-color: var(--green); }
+.domain-card.card-expired { border-left-color: var(--red); }
+.domain-card.card-warning { border-left-color: var(--yellow); }
+.domain-card.card-pending { border-left-color: var(--gray); }
 .domain-card:hover { border-color: var(--primary); box-shadow: var(--shadow-md); }
 .domain-card.checking { opacity: 0.7; }
 .domain-card.checking::after {
@@ -836,6 +841,8 @@ legend { font-weight: 600; font-size: 15px; padding: 0 8px; color: var(--primary
   line-height: 1.4;
 }
 .sort-bar .btn-sm:active { transform: scale(0.97); }
+.sort-select { background: var(--bg-input); border: 1px solid var(--border); color: var(--text); padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; outline: none; }
+.sort-select:focus { border-color: var(--primary); }
 
 /* ─── Bulk select-all ────────────────────────────────────────── */
 .bulk-select-all { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; transition: color 0.15s; }
@@ -1493,3 +1500,25 @@ body.dark .badge-json { background: #e65100; color: #ffcc80; }
 .incident-icon.expired { color: var(--red); }
 .incident-dir { flex: 1; font-weight: 500; }
 .incident-time { color: var(--text-muted); font-size: 12px; }
+
+/* ─── Filter chip count badges ────────────────────────────────── */
+.log-filter .filter-count { margin-left: 4px; font-size: 10px; opacity: 0.7; font-weight: 400; }
+
+/* ─── Skeleton loading ────────────────────────────────────────── */
+@keyframes skeleton-shimmer { 0% { background-position: -200px 0; } 100% { background-position: calc(200px + 100%) 0; } }
+.skeleton-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; display: flex; gap: 14px; margin-bottom: 8px; }
+.skeleton-card .sk-block { flex: 1; }
+.skeleton-card .sk-row { height: 14px; margin-bottom: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--bg-input) 25%, var(--border) 50%, var(--bg-input) 75%); background-size: 200px 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
+.skeleton-card .sk-row:last-child { width: 60%; margin-bottom: 0; }
+.skeleton-card .sk-badge { width: 50px; height: 22px; border-radius: 6px; background: linear-gradient(90deg, var(--bg-input) 25%, var(--border) 50%, var(--bg-input) 75%); background-size: 200px 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; flex-shrink: 0; }
+
+/* ─── Card status change pulse ─────────────────────────────────── */
+@keyframes statusPulse { 0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.4); } 70% { box-shadow: 0 0 0 8px rgba(59,130,246,0); } 100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); } }
+.domain-card.status-changed { animation: statusPulse 1s ease-out; }
+
+/* ─── Compact actions dropdown ─────────────────────────────────── */
+.header-actions .actions-dropdown { position: relative; }
+.header-actions .actions-dropdown-content { display: none; position: absolute; top: 100%; right: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-lg); z-index: 100; min-width: 160px; padding: 6px; margin-top: 4px; }
+.header-actions .actions-dropdown.open .actions-dropdown-content { display: block; }
+.header-actions .actions-dropdown-content button { display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: none; color: var(--text); font-size: 13px; border-radius: 4px; cursor: pointer; }
+.header-actions .actions-dropdown-content button:hover { background: var(--bg-hover); }

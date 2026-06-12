@@ -183,6 +183,10 @@ document.addEventListener('click', (e) => {
   else if (action === 'close-quickadd-modal') { closeQuickAddModal(); }
 
   // ─── Web Apps actions ──────────────────────────────────────────
+  else if (action === 'toggle-actions-dropdown') {
+    var dd = btn.closest('.actions-dropdown');
+    if (dd) dd.classList.toggle('open');
+  }
   else if (action === 'add-webapp') { openWebAppModal(null); }
   else if (action === 'close-webapp-modal') { closeWebAppModal(); }
   else if (action === 'toggle-view-webapps') {
@@ -197,7 +201,14 @@ document.addEventListener('click', (e) => {
   }
   else if (action === 'webapp-check-now') {
     var wid = parseInt(btn.dataset.id);
-    api('POST', '/api/webapps/' + wid + '/check').then(function () { loadWebApps(true); }).catch(function (e) { toast(e.message, 'error'); });
+    var oldStatus = (_webappsCache || []).find(function (a) { return a.id === wid; });
+    api('POST', '/api/webapps/' + wid + '/check').then(function () {
+      loadWebApps(true);
+      setTimeout(function () {
+        var card = document.querySelector('[data-webapp-id="' + wid + '"]');
+        if (card) { card.classList.add('status-changed'); setTimeout(function () { card.classList.remove('status-changed'); }, 1000); }
+      }, 100);
+    }).catch(function (e) { toast(e.message, 'error'); });
   }
   else if (action === 'webapp-edit') {
     var wid = parseInt(btn.dataset.id);
@@ -544,16 +555,10 @@ document.getElementById('webapp-filters').addEventListener('click', (e) => {
   _webappPagination.page = 0;
   applyWebAppFilters(_webappsCache || []);
 });
-document.getElementById('sort-bar-webapp').addEventListener('click', (e) => {
-  var btn = e.target.closest('[data-sort]');
-  if (!btn) return;
-  var key = btn.dataset.sort;
-  if (_webappSort.key === key) _webappSort.dir *= -1;
-  else { _webappSort.key = key; _webappSort.dir = 1; }
-  document.querySelectorAll('#sort-bar-webapp .sort-btn').forEach(function (b) { b.classList.remove('active'); });
-  btn.classList.add('active');
-  var arrow = btn.querySelector('.sort-arrow');
-  if (arrow) arrow.innerHTML = _webappSort.dir === 1 ? '&#9650;' : '&#9660;';
+document.getElementById('sort-webapp-select').addEventListener('change', (e) => {
+  var opt = e.target.options[e.target.selectedIndex];
+  _webappSort.key = opt.value;
+  _webappSort.dir = parseInt(opt.dataset.dir) || 1;
   _webappPagination.page = 0;
   applyWebAppFilters(_webappsCache || []);
 });
@@ -688,6 +693,20 @@ document.addEventListener('click', (e) => {
   if (!th) return;
   const field = th.dataset.sort;
   const type = th.dataset.type;
+  if (type === 'webapp') {
+    var sel = document.getElementById('sort-webapp-select');
+    if (!sel) return;
+    var opt;
+    if (_webappSort.key === field) { _webappSort.dir *= -1; } else { _webappSort.key = field; _webappSort.dir = 1; }
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value === field && parseInt(sel.options[i].dataset.dir) === _webappSort.dir) {
+        sel.selectedIndex = i; break;
+      }
+    }
+    _webappPagination.page = 0;
+    applyWebAppFilters(_webappsCache || []);
+    return;
+  }
   const s = sortState[type];
   if (s.field === field) { s.dir *= -1; } else { s.field = field; s.dir = 1; }
   _updateSortArrows(type, field, s.dir);
@@ -1247,15 +1266,33 @@ function openWebAppDetail(wa) {
   modal.classList.add('open');
 }
 
+function showWebappSkeleton(show) {
+  var list = document.getElementById('webapp-list');
+  var sk = document.getElementById('webapp-skeleton');
+  if (!sk) return;
+  if (show) {
+    list.style.display = 'none';
+    sk.style.display = '';
+    if (!sk.querySelector('.skeleton-card')) {
+      sk.innerHTML = Array(6).fill('<div class="skeleton-card"><div class="sk-badge"></div><div class="sk-block"><div class="sk-row"></div><div class="sk-row"></div></div></div>').join('');
+    }
+  } else {
+    sk.style.display = 'none';
+    list.style.display = '';
+  }
+}
+
 function loadWebApps(force) {
   if (force) _webappSparklineCache = {};
+  showWebappSkeleton(true);
   var path = '/api/webapps' + (force ? '?_=' + Date.now() : '');
   api('GET', path).then(function (apps) {
     _webappsCache = apps;
+    showWebappSkeleton(false);
     renderWebApps(apps);
     var empty = document.getElementById('empty-state-webapp');
     if (empty) empty.style.display = apps.length ? 'none' : '';
-  }).catch(function (e) { toast(e.message, 'error'); });
+  }).catch(function (e) { showWebappSkeleton(false); toast(e.message, 'error'); });
 }
 
 function renderWebApps(apps) {
@@ -1271,12 +1308,13 @@ function renderWebAppStats(apps) {
   var unknown = apps.filter(function (a) { return a.status === 'unknown' || !a.status; }).length;
   var rts = apps.filter(function (a) { return a.response_time_ms != null; }).map(function (a) { return a.response_time_ms; });
   var avg = rts.length ? Math.round(rts.reduce(function (a, b) { return a + b; }, 0) / rts.length) : '—';
-  document.getElementById('stat-webapp-total').textContent = total;
-  document.getElementById('stat-webapp-up').textContent = up;
-  document.getElementById('stat-webapp-down').textContent = down;
-  document.getElementById('stat-webapp-slow').textContent = slow;
-  document.getElementById('stat-webapp-unknown').textContent = unknown;
-  document.getElementById('stat-webapp-avg-response').textContent = avg === '—' ? '—' : avg + 'ms';
+  var ids = { 'all': total, 'up': up, 'down': down, 'slow': slow, 'unknown': unknown };
+  Object.keys(ids).forEach(function (k) {
+    var el = document.getElementById('wa-count-' + k);
+    if (el) el.textContent = ids[k];
+  });
+  var avgEl = document.getElementById('wa-avg-response');
+  if (avgEl) avgEl.textContent = avg === '—' ? '' : 'Avg ' + avg + 'ms';
 }
 
 function applyWebAppFilters(apps) {
@@ -1327,16 +1365,16 @@ function renderWebAppCardHtml(a) {
   var total = a.total_checks || 0;
   var uptimePct = total ? Math.round((a.successful_checks || 0) / total * 100) + '%' : '—';
   var paused = a.is_active === 0 || a.is_active === false;
-  return '<div class="domain-card' + (_selectedWebapps.has(a.id) ? ' selected' : '') + (paused ? ' paused' : '') + '" data-webapp-id="' + a.id + '">' +
+  return '<div class="domain-card card-' + cls + (_selectedWebapps.has(a.id) ? ' selected' : '') + (paused ? ' paused' : '') + '" data-webapp-id="' + a.id + '">' +
     '<label class="bulk-check"><input type="checkbox" class="webapp-select" value="' + a.id + '"' + (_selectedWebapps.has(a.id) ? ' checked' : '') + '></label>' +
-    '<div class="card-body' + (paused ? ' opacity-50' : '') + '" data-action="webapp-check-now" data-id="' + a.id + '">' +
+    '<div class="card-body' + (paused ? ' opacity-50' : '') + '" data-action="webapp-detail" data-id="' + a.id + '">' +
     '<div class="card-top">' +
     '<span class="domain-badge status-badge ' + cls + '">' + st.toUpperCase() + (paused ? ' (PAUSED)' : '') + '</span>' +
     '<strong class="card-url">' + escHtml(a.name || a.url) + '</strong>' +
     '<span class="card-time">' + escUrl(a.url) + '</span>' +
     '</div>' +
     '<div class="card-meta"><span>Response: ' + rt + '</span><span>HTTP ' + code + '</span><span>Uptime: ' + uptimePct + '</span><span>Checked: ' + checked + '</span></div>' +
-    '<div class="webapp-sparkline" id="spark-wa-' + a.id + '" style="height:20px;margin-top:4px"></div>' +
+    '<div class="webapp-sparkline" id="spark-wa-' + a.id + '" style="height:40px;margin-top:4px"></div>' +
     '</div>' +
     '<div class="card-actions">' +
     '<button class="btn btn-sm btn-secondary" data-action="webapp-check-now" data-id="' + a.id + '">Check Now</button>' +
@@ -1361,7 +1399,7 @@ function renderWebAppCards(apps) {
   }
 
   if (page.length === 0) {
-    container.innerHTML = '<div class="empty-state"><p>No web apps match your filters.</p></div>';
+    container.innerHTML = '<div class="empty-state"><div class="empty-illustration"><svg width="60" height="60" viewBox="0 0 80 80" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><circle cx="40" cy="40" r="28"/><path d="M30 40l8 8 14-14"/></svg></div><p>No web apps match your filters.</p><div class="empty-actions"><button class="btn btn-sm btn-secondary" data-action="clear-webapp-filters">Clear Filters</button></div></div>';
     updateWebappBulkToolbar();
     return;
   }
@@ -1429,6 +1467,7 @@ function renderWebAppTable(apps) {
       '<td class="col-response">' + rt + '</td>' +
       '<td class="col-code">' + code + '</td>' +
       '<td class="col-uptime">' + uptimePct + '</td>' +
+      '<td class="col-sparkline"><div class="webapp-sparkline" id="spark-wa-' + a.id + '" style="height:40px"></div></td>' +
       '<td class="col-checked">' + checked + '</td>' +
       '<td class="col-actions">' +
       '<button class="btn btn-sm btn-secondary" data-action="webapp-check-now" data-id="' + a.id + '">Check</button>' +
@@ -1438,8 +1477,11 @@ function renderWebAppTable(apps) {
       '<button data-action="webapp-edit" data-id="' + a.id + '">Edit</button>' +
       '<button data-action="webapp-delete" data-id="' + a.id + '">Delete</button>' +
       '</div></div></td></tr>';
-  }).join('') || '<tr><td colspan="9" class="empty-state"><p>No web apps match your filters.</p></td></tr>';
+  }).join('') || '<tr><td colspan="10" class="empty-state"><p>No web apps match your filters.</p></td></tr>';
   updateWebappBulkToolbar();
+  page.forEach(function (a) {
+    if (a.id && a.status) loadWebappSparkline(a.id);
+  });
 }
 
 function renderWebAppPagination(apps) {
@@ -4130,7 +4172,7 @@ function renderWebappSparkline(id, data) {
   var rts = data.filter(function (d) { return d.response_time_ms != null; }).map(function (d) { return d.response_time_ms; });
   if (rts.length < 2) { el.innerHTML = ''; return; }
   var w = el.offsetWidth || 120;
-  var h = 20;
+  var h = 40;
   var max = Math.max.apply(null, rts);
   var min = Math.min.apply(null, rts);
   var range = max - min || 1;
@@ -4670,7 +4712,15 @@ function _renderSparklineSvg(container, data) {
   const pts = values.map((v, i) => `${i * (w / (values.length - 1))},${h - ((v - min) / range) * (h - 2) - 1}`).join(' ');
   const color = getComputedStyle(document.body).getPropertyValue('--primary').trim() || '#3b82f6';
   container.innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="vertical-align:middle"><polyline fill="none" stroke="${color}" stroke-width="1.5" points="${pts}"/></svg>`;
-}// ─── Init ──────────────────────────────────────────────────────
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.actions-dropdown')) {
+    document.querySelectorAll('.actions-dropdown.open').forEach(function (d) { d.classList.remove('open'); });
+  }
+});
+
+// ─── Init ──────────────────────────────────────────────────────
 checkSession().then(() => {
   initTheme();
   _updateSortArrows('full', 'url', 1);

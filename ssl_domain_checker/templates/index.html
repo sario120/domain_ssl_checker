@@ -393,9 +393,14 @@
         <div class="header-actions">
           <input type="text" id="webapp-search" class="domain-search-input" placeholder="Search web apps...">
           <button class="btn btn-secondary" data-action="toggle-view-webapps" title="Switch to table view"><span class="view-toggle-icon">&#9776;</span><span class="view-toggle-label">Table</span></button>
-          <button class="btn btn-secondary" data-action="check-all-webapps">Check All</button>
-          <button class="btn btn-secondary" data-action="webapp-export-csv">Export CSV</button>
-          <button class="btn btn-secondary" data-action="import">Import</button>
+          <div class="actions-dropdown">
+            <button class="btn btn-secondary" data-action="toggle-actions-dropdown">Actions &#9662;</button>
+            <div class="actions-dropdown-content">
+              <button data-action="check-all-webapps">&#x21bb; Check All</button>
+              <button data-action="webapp-export-csv">&#x2197; Export CSV</button>
+              <button data-action="import">&#x21E7; Import</button>
+            </div>
+          </div>
           <button class="btn btn-primary" data-action="add-webapp">+ Add Web App</button>
         </div>
       </div>
@@ -405,11 +410,13 @@
       </div>
 
       <div class="domain-filters" id="webapp-filters">
-        <button class="log-filter active" data-webapp-filter="all">All</button>
-        <button class="log-filter" data-webapp-filter="up">Up</button>
-        <button class="log-filter" data-webapp-filter="down">Down</button>
-        <button class="log-filter" data-webapp-filter="slow">Slow</button>
-        <button class="log-filter" data-webapp-filter="unknown">Unknown</button>
+        <button class="log-filter active" data-webapp-filter="all">All <span class="filter-count" id="wa-count-all"></span></button>
+        <button class="log-filter" data-webapp-filter="up">Up <span class="filter-count" id="wa-count-up"></span></button>
+        <button class="log-filter" data-webapp-filter="down">Down <span class="filter-count" id="wa-count-down"></span></button>
+        <button class="log-filter" data-webapp-filter="slow">Slow <span class="filter-count" id="wa-count-slow"></span></button>
+        <button class="log-filter" data-webapp-filter="unknown">Unknown <span class="filter-count" id="wa-count-unknown"></span></button>
+        <span style="flex:1"></span>
+        <span class="text-muted" style="font-size:12px;align-self:center" id="wa-avg-response"></span>
       </div>
 
       <div class="bulk-toolbar" id="webapp-bulk-toolbar" style="display:none">
@@ -421,12 +428,20 @@
       </div>
 
       <div class="sort-bar" id="sort-bar-webapp">
-        <button class="sort-btn active" data-sort="name" data-type="webapp">Name <span class="sort-arrow">&#9650;</span></button>
-        <button class="sort-btn" data-sort="url" data-type="webapp">URL</button>
-        <button class="sort-btn" data-sort="status" data-type="webapp">Status</button>
-        <button class="sort-btn" data-sort="response_time" data-type="webapp">Response Time</button>
-        <button class="sort-btn" data-sort="uptime_pct" data-type="webapp">Uptime %</button>
-        <button class="sort-btn" data-sort="checked" data-type="webapp">Last Checked</button>
+        <select id="sort-webapp-select" class="sort-select" data-type="webapp">
+          <option value="name" data-dir="asc">Name &#9650;</option>
+          <option value="name" data-dir="desc">Name &#9660;</option>
+          <option value="url" data-dir="asc">URL &#9650;</option>
+          <option value="url" data-dir="desc">URL &#9660;</option>
+          <option value="status" data-dir="asc">Status &#9650;</option>
+          <option value="status" data-dir="desc">Status &#9660;</option>
+          <option value="response_time" data-dir="asc">Response Time &#9650;</option>
+          <option value="response_time" data-dir="desc">Response Time &#9660;</option>
+          <option value="uptime_pct" data-dir="asc">Uptime % &#9650;</option>
+          <option value="uptime_pct" data-dir="desc">Uptime % &#9660;</option>
+          <option value="checked" data-dir="asc">Last Checked &#9650;</option>
+          <option value="checked" data-dir="desc">Last Checked &#9660;</option>
+        </select>
         <div class="sort-right">
           <label class="sort-toggle"><input type="checkbox" id="webapp-group-by-status"> Group by status</label>
           <div class="column-toggle" id="col-toggle-webapp">
@@ -438,6 +453,7 @@
               <label class="col-check"><input type="checkbox" data-col="col-response" checked> Response Time</label>
               <label class="col-check"><input type="checkbox" data-col="col-code" checked> Status Code</label>
               <label class="col-check"><input type="checkbox" data-col="col-uptime" checked> Uptime %</label>
+              <label class="col-check"><input type="checkbox" data-col="col-sparkline" checked> Activity</label>
               <label class="col-check"><input type="checkbox" data-col="col-checked" checked> Last Checked</label>
               <label class="col-check"><input type="checkbox" data-col="col-actions" checked> Actions</label>
             </div>
@@ -446,17 +462,10 @@
         </div>
       </div>
 
-      <div class="stats-bar" id="webapp-stats-bar">
-        <div class="stat total"><span class="stat-count" id="stat-webapp-total">0</span> Total</div>
-        <div class="stat healthy"><span class="stat-count" id="stat-webapp-up">0</span> Up</div>
-        <div class="stat danger"><span class="stat-count" id="stat-webapp-down">0</span> Down</div>
-        <div class="stat warning"><span class="stat-count" id="stat-webapp-slow">0</span> Slow</div>
-        <div class="stat pending"><span class="stat-count" id="stat-webapp-unknown">0</span> Unknown</div>
-        <div class="stat" style="border-left:1px solid var(--border);padding-left:16px;margin-left:4px"><span class="stat-count" id="stat-webapp-avg-response">—</span> Avg Response</div>
-      </div>
       <div id="webapp-list" class="domain-list"></div>
+      <div id="webapp-skeleton" class="domain-list" style="display:none"></div>
       <table id="webapp-table" class="domain-table" style="display:none">
-        <thead><tr><th class="col-checkbox"></th><th class="col-name" data-sort="name" data-type="webapp">Name <span class="sort-arrow"></span></th><th class="col-url" data-sort="url" data-type="webapp">URL <span class="sort-arrow"></span></th><th class="col-status" data-sort="status" data-type="webapp">Status <span class="sort-arrow"></span></th><th class="col-response" data-sort="response_time" data-type="webapp">Response Time <span class="sort-arrow"></span></th><th class="col-code" data-sort="code" data-type="webapp">Status Code <span class="sort-arrow"></span></th><th class="col-uptime" data-sort="uptime_pct" data-type="webapp">Uptime % <span class="sort-arrow"></span></th><th class="col-checked" data-sort="checked" data-type="webapp">Last Checked <span class="sort-arrow"></span></th><th class="col-actions">Actions</th></tr></thead>
+        <thead><tr><th class="col-checkbox"></th><th class="col-name" data-sort="name" data-type="webapp">Name <span class="sort-arrow"></span></th><th class="col-url" data-sort="url" data-type="webapp">URL <span class="sort-arrow"></span></th><th class="col-status" data-sort="status" data-type="webapp">Status <span class="sort-arrow"></span></th><th class="col-response" data-sort="response_time" data-type="webapp">Response Time <span class="sort-arrow"></span></th><th class="col-code" data-sort="code" data-type="webapp">Status Code <span class="sort-arrow"></span></th><th class="col-uptime" data-sort="uptime_pct" data-type="webapp">Uptime % <span class="sort-arrow"></span></th><th class="col-sparkline">Activity</th><th class="col-checked" data-sort="checked" data-type="webapp">Last Checked <span class="sort-arrow"></span></th><th class="col-actions">Actions</th></tr></thead>
         <tbody id="webapp-table-body"></tbody>
       </table>
       <div class="pagination-wrapper" id="pagination-webapp" style="display:none">
@@ -474,10 +483,14 @@
         </div>
       </div>
       <div id="empty-state-webapp" class="empty-state" style="display:none">
+        <div class="empty-illustration">
+          <svg width="80" height="80" viewBox="0 0 80 80" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><circle cx="40" cy="40" r="28"/><path d="M30 40l8 8 14-14"/></svg>
+        </div>
         <p>No web apps monitored yet.</p>
+        <p class="text-muted" style="font-size:13px;margin-top:4px">Add your first endpoint or import from CSV/JSON to start monitoring uptime.</p>
         <div class="empty-actions">
-          <button class="btn btn-primary" data-action="add-webapp">Add your first web app</button>
-          <button class="btn btn-secondary" data-action="download-template-webapp">Download import template</button>
+          <button class="btn btn-primary" data-action="add-webapp">+ Add Your First Web App</button>
+          <button class="btn btn-secondary" data-action="import">Import from CSV/JSON</button>
         </div>
       </div>
     </section>
