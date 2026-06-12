@@ -17,14 +17,19 @@ Tech: Flask + SQLite (WAL mode) + APScheduler + vanilla JS frontend.
 - Admin self-deactivation blocked at route level (`@admin_required` + `current_user.id == user_id` check).
 
 ### Frontend
-- **No framework** — vanilla JS in `static/app.js` (~3600 lines), `static/login.js` (136 lines).
+- **No framework** — vanilla JS in `static/app.js` (~4955 lines), `static/login.js` (136 lines).
 - **Hash-based routing** — `window.location.hash` drives view switching.
 - **Dark/light theme** — toggled via `localStorage`, class on `<body>`.
 - **Event delegation** — all click actions handled via single `data-action` attribute listener.
 - **Domain/SSL pages** share a common rendering pattern: card + table toggling, sort bar, stats bar, filter chips, search + TLD dropdown, pagination, bulk selection with shift-click range, column visibility dropdown.
+- **Webapps page** has its own rendering: cards with color-coded left border, card body opens detail modal, 40px sparklines, table sparkline column, filter badge counts replacing stats bar, skeleton loading, Actions dropdown in header, sort dropdown, status-change pulse animation, enhanced empty state.
+- **Webapp detail modal** shows uptime % bars (24h/7d/30d/365d), incident list, response time chart (SVG polyline + area with Y-axis labels, X-axis time labels, hover tooltip with dashed guide line, duration selector 1h/6h/12h/24h/7d/30d/365d), current up/down duration, response time stats (avg/min/max/latest).
 - **Logs page** has search, type filter chips, summary cards (total/check/alert/error), activity bar chart, pagination with mobile card view.
 - **Kebab dropdowns** use `position: fixed` with JS viewport clamping to prevent clipping behind any parent container.
 - Domain filters, view mode, pagination state, column visibility, group-by-status persisted in `_cachedDomains`, `_viewMode`, `_pagination`, `_domainFilter`, `_tldFilter`, `selectedDomains`/`selectedSsl` globals.
+- Webapp globals: `_detailWebappId`, `_detailChartHours`, `_timezoneOffsetH` (default 5 for PKT).
+- Chart rendering via string-based SVG in `loadWebappChart()`; all timestamps converted to local timezone via `_parseDt()` + `_toLocal()` using `_timezoneOffsetH`.
+- `relativeTime()` shows "X ago" with defensive NaN checks; `formatDurationLong()` shows exact seconds/minutes.
 
 ### Database
 - SQLite with WAL mode, foreign keys ON, busy timeout 5s.
@@ -68,6 +73,13 @@ Tech: Flask + SQLite (WAL mode) + APScheduler + vanilla JS frontend.
 1. Create a sender function in `ssl_domain_checker/webhook.py` (or a new module referenced from `alert.py`).
 2. Add settings columns to the `settings` table for configuration.
 3. Wire up in `alert.py:send_alerts()` and `webhook.py:send_webhook_alerts()`.
+
+### Adding a webapp page feature
+1. For filter chips, add the button in `templates/index.html` inside `.webapp-filters` block and handle in `applyWebappFilters()` in `app.js`.
+2. For sort options, add to `<select id="webapp-sort-select">` and handle in `renderWebappCards()` / `renderWebappTable()`.
+3. For card actions, use `data-action` attribute on kebab dropdown items; the global click delegator handles it.
+4. For detail modal additions, add elements to `#webapp-detail-modal` in the template and wire in `loadWebappDetail()` / `loadWebappChart()` in `app.js`.
+5. Chart features: SVG built via string concatenation in `loadWebappChart()`; add `<rect class="chart-hover-overlay">` for mouse tracking; use `_parseDt()` / `_toLocal()` for timezone-aware timestamps; format X-axis labels with `fmtAxisLabel()`.
 
 ### Adding a domain/SSL page feature
 1. If adding a new filter chip type, add the button in `templates/index.html` inside the appropriate `.domain-filters` block and handle the filter value in `applyDomainFilters()` in `app.js`.
