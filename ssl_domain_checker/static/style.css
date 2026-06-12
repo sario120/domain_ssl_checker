@@ -257,7 +257,7 @@ body {
 .domain-card .domain-status.expired { color: var(--red); background: var(--red-bg); }
 .domain-card .domain-status.error { color: var(--red); background: var(--red-bg); }
 
-.domain-card .domain-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.domain-card .domain-actions { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }
 
 .domain-card .domain-actions .btn {
   background: var(--bg-input); border: 1px solid var(--border);
@@ -1227,6 +1227,8 @@ legend { font-weight: 600; font-size: 15px; padding: 0 8px; color: var(--primary
 .domain-table .table-actions { display: flex; gap: 6px; }
 .domain-table .table-actions .btn { padding: 4px 8px; font-size: 11px; }
 .domain-table .table-actions .btn:hover { color: var(--primary); border-color: var(--primary); }
+.domain-table .col-actions { text-align: right; white-space: nowrap; }
+.domain-table .col-actions .btn + .kebab { margin-left: 4px; }
 
 /* ─── Expiry countdown bar ───────────────────────────────────── */
 .expiry-bar {
@@ -1452,6 +1454,8 @@ body.dark .badge-json { background: #e65100; color: #ffcc80; }
 .opacity-50 { opacity: 0.5; }
 .paused { opacity: 0.85; }
 .paused .domain-badge { opacity: 0.6; }
+
+.domain-card .card-body { flex: 1; min-width: 0; }
 
 .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
 .detail-stat { background: var(--bg-input); padding: 10px 12px; border-radius: 6px; }
