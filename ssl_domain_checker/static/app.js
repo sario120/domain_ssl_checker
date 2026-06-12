@@ -1248,16 +1248,29 @@ function loadWebappChart() {
 
     var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+    function parseCheckedAt(str) {
+      var parts = str.split(' ');
+      if (parts.length < 2) return null;
+      var dateParts = parts[0].split('-');
+      var timeParts = parts[1].split(':');
+      if (dateParts.length < 3 || timeParts.length < 2) return null;
+      return {
+        month: parseInt(dateParts[1], 10) - 1,
+        day: parseInt(dateParts[2], 10),
+        hour: parseInt(timeParts[0], 10),
+        min: parseInt(timeParts[1], 10)
+      };
+    }
+
     function fmtAxisLabel(dateStr) {
-      var d = new Date(_toUtcIso(dateStr));
-      if (isNaN(d.getTime())) return dateStr;
-      var mon = months[d.getMonth()];
-      var day = d.getDate();
-      var hh = d.getHours().toString().padStart(2, '0');
-      var mm = d.getMinutes().toString().padStart(2, '0');
-      if (_detailChartHours <= 24) return mon + ' ' + day + ', ' + hh + ':' + mm;
-      if (_detailChartHours <= 168) return mon + ' ' + day + ', ' + hh + ':00';
-      return mon + ' ' + day;
+      var p = parseCheckedAt(dateStr);
+      if (!p) return dateStr;
+      var mon = months[p.month];
+      var hh = p.hour.toString().padStart(2, '0');
+      var mm = p.min.toString().padStart(2, '0');
+      if (_detailChartHours <= 24) return mon + ' ' + p.day + ', ' + hh + ':' + mm;
+      if (_detailChartHours <= 168) return mon + ' ' + p.day + ', ' + hh + ':00';
+      return mon + ' ' + p.day;
     }
 
     var minLabelSpacing = 70;
@@ -1324,10 +1337,15 @@ function loadWebappChart() {
         hoverLine.style.display = '';
 
         var pt = withRt[idx];
-        var d = new Date(_toUtcIso(pt.checked_at));
+        var p = parseCheckedAt(pt.checked_at);
         var timeStr = pt.checked_at;
-        if (!isNaN(d.getTime())) {
-          timeStr = d.toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+        if (p) {
+          var yyyy = pt.checked_at.split(' ')[0].split('-')[0];
+          var monName = ['January','February','March','April','May','June','July','August','September','October','November','December'][p.month];
+          var hh12 = p.hour % 12 || 12;
+          var ampm = p.hour < 12 ? 'AM' : 'PM';
+          var mmS = p.min.toString().padStart(2, '0');
+          timeStr = monName + ' ' + p.day + ', ' + yyyy + ', ' + hh12 + ':' + mmS + ' ' + ampm + ' UTC';
         }
         tooltip.innerHTML = '<div>' + timeStr + '</div><div style="font-weight:600;color:' + color + '">' + pt.response_time_ms + ' ms</div>';
         tooltip.style.display = '';
