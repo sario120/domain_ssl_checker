@@ -482,6 +482,7 @@ def _run_sqlite_migrations():
         conn.execute("ALTER TABLE webapps ADD COLUMN last_alerted TEXT")
     if "status_changed_at" not in wcols:
         conn.execute("ALTER TABLE webapps ADD COLUMN status_changed_at TEXT")
+        conn.execute("UPDATE webapps SET status_changed_at=COALESCE(last_checked, created_at) WHERE status_changed_at IS NULL")
     conn.commit()
 
 
@@ -1470,13 +1471,18 @@ def get_webapp_detail_stats(webapp_id):
 
     wa = get_webapp(webapp_id)
     current_duration = None
-    sca = parse_dt(wa.get('status_changed_at')) if wa else None
-    if sca:
-        current_duration = int((now - sca).total_seconds())
-    elif wa:
-        lc = parse_dt(wa.get('last_checked'))
-        if lc:
-            current_duration = int((now - lc).total_seconds())
+    if wa:
+        sca = parse_dt(wa.get('status_changed_at'))
+        if sca:
+            current_duration = int((now - sca).total_seconds())
+        else:
+            lc = parse_dt(wa.get('last_checked'))
+            if lc:
+                current_duration = int((now - lc).total_seconds())
+            else:
+                ca = parse_dt(wa.get('created_at'))
+                if ca:
+                    current_duration = int((now - ca).total_seconds())
 
     history = conn.execute(
         "SELECT checked_at, status FROM webapp_results WHERE webapp_id=? "
