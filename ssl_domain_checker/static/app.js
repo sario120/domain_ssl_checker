@@ -909,20 +909,24 @@ async function api(method, path, body) {
 }
 
 function _toUtcIso(dateStr) {
-  dateStr = dateStr.replace(' ', 'T');
+  if (!dateStr) return '';
+  dateStr = dateStr.trim().replace(' ', 'T');
   if (/Z$|[+-]\d{2}:?\d{2}$/.test(dateStr)) return dateStr;
   return dateStr + 'Z';
 }
 
 function formatDate(dateStr) {
   if (!dateStr) return '';
-  const d = new Date(_toUtcIso(dateStr));
+  var d = new Date(_toUtcIso(dateStr));
+  if (isNaN(d.getTime())) return dateStr;
   return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function relativeTime(dateStr) {
   if (!dateStr) return '';
-  var diff = Date.now() - new Date(_toUtcIso(dateStr)).getTime();
+  var d = new Date(_toUtcIso(dateStr));
+  if (isNaN(d.getTime())) return dateStr;
+  var diff = Date.now() - d.getTime();
   if (diff < 0) return 'just now';
   var sec = Math.floor(diff / 1000);
   if (sec < 60) return sec + 's ago';
@@ -1377,17 +1381,21 @@ function renderWebAppCardHtml(a) {
     '<div class="webapp-sparkline" id="spark-wa-' + a.id + '" style="height:40px;margin-top:4px"></div>' +
     '</div>' +
     '<div class="card-actions">' +
-    '<button class="btn btn-sm btn-secondary" data-action="webapp-check-now" data-id="' + a.id + '">Check Now</button>' +
-    '<div class="kebab" data-action="webapp-menu" data-id="' + a.id + '"><span>&#8942;</span><div class="kebab-dropdown">' +
-    '<button data-action="webapp-toggle-active" data-id="' + a.id + '">' + (paused ? 'Resume' : 'Pause') + '</button>' +
-    '<button data-action="webapp-detail" data-id="' + a.id + '">View Details</button>' +
-    '<button data-action="webapp-edit" data-id="' + a.id + '">Edit</button>' +
-    '<button data-action="webapp-delete" data-id="' + a.id + '">Delete</button>' +
+    '<div class="actions-dropdown">' +
+    '<button class="btn btn-sm btn-secondary" data-action="toggle-actions-dropdown">Actions &#9662;</button>' +
+    '<div class="actions-dropdown-content">' +
+    '<button data-action="webapp-check-now" data-id="' + a.id + '">&#x21bb; Check Now</button>' +
+    '<button data-action="webapp-detail" data-id="' + a.id + '">&#x1F50D; View Details</button>' +
+    '<button data-action="webapp-toggle-active" data-id="' + a.id + '">' + (paused ? '&#x25B6; Resume' : '&#x23F8; Pause') + '</button>' +
+    '<button data-action="webapp-edit" data-id="' + a.id + '">&#x270E; Edit</button>' +
+    '<button data-action="webapp-delete" data-id="' + a.id + '">&#x1F5D1; Delete</button>' +
     '</div></div></div></div>';
 }
 
 function renderWebAppCards(apps) {
   var container = document.getElementById('webapp-list');
+  document.getElementById('webapp-table').style.display = 'none';
+  container.style.display = '';
   var pg = _webappPagination;
   var start = pg.page * pg.size;
   var page = apps.slice(start, start + pg.size);
@@ -1438,6 +1446,8 @@ function renderWebAppCards(apps) {
 }
 
 function renderWebAppTable(apps) {
+  document.getElementById('webapp-list').style.display = 'none';
+  document.getElementById('webapp-table').style.display = '';
   var tbody = document.getElementById('webapp-table-body');
   var pg = _webappPagination;
   var start = pg.page * pg.size;
@@ -1470,12 +1480,14 @@ function renderWebAppTable(apps) {
       '<td class="col-sparkline"><div class="webapp-sparkline" id="spark-wa-' + a.id + '" style="height:40px"></div></td>' +
       '<td class="col-checked">' + checked + '</td>' +
       '<td class="col-actions">' +
-      '<button class="btn btn-sm btn-secondary" data-action="webapp-check-now" data-id="' + a.id + '">Check</button>' +
-      '<div class="kebab" data-action="webapp-menu" data-id="' + a.id + '"><span>&#8942;</span><div class="kebab-dropdown">' +
-      '<button data-action="webapp-toggle-active" data-id="' + a.id + '">' + (paused ? 'Resume' : 'Pause') + '</button>' +
-      '<button data-action="webapp-detail" data-id="' + a.id + '">View Details</button>' +
-      '<button data-action="webapp-edit" data-id="' + a.id + '">Edit</button>' +
-      '<button data-action="webapp-delete" data-id="' + a.id + '">Delete</button>' +
+      '<div class="actions-dropdown">' +
+      '<button class="btn btn-sm btn-secondary" data-action="toggle-actions-dropdown">Actions &#9662;</button>' +
+      '<div class="actions-dropdown-content">' +
+      '<button data-action="webapp-check-now" data-id="' + a.id + '">&#x21bb; Check Now</button>' +
+      '<button data-action="webapp-detail" data-id="' + a.id + '">&#x1F50D; View Details</button>' +
+      '<button data-action="webapp-toggle-active" data-id="' + a.id + '">' + (paused ? '&#x25B6; Resume' : '&#x23F8; Pause') + '</button>' +
+      '<button data-action="webapp-edit" data-id="' + a.id + '">&#x270E; Edit</button>' +
+      '<button data-action="webapp-delete" data-id="' + a.id + '">&#x1F5D1; Delete</button>' +
       '</div></div></td></tr>';
   }).join('') || '<tr><td colspan="10" class="empty-state"><p>No web apps match your filters.</p></td></tr>';
   updateWebappBulkToolbar();
