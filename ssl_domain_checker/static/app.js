@@ -262,10 +262,7 @@ document.addEventListener('click', (e) => {
   else if (action === 'close-webapp-detail') {
     document.getElementById('webapp-detail-modal').classList.remove('open');
   }
-  else if (action === 'chart-duration') {
-    var h = parseInt(btn.dataset.hours);
-    if (h && _detailChartHours !== h) { _detailChartHours = h; loadWebappChart(); }
-  }
+
   else if (action === 'clear-webapp-filters') {
     document.getElementById('webapp-search').value = '';
     _webappFilter = 'all';
@@ -1180,6 +1177,13 @@ function formatDurationCompact(h, m, d, hr) {
 var _detailWebappId = null;
 var _detailChartHours = 24;
 
+document.getElementById('chart-duration-bar') && document.getElementById('chart-duration-bar').addEventListener('click', function (e) {
+  var btn = e.target.closest('[data-hours]');
+  if (!btn) return;
+  var h = parseInt(btn.dataset.hours);
+  if (h && _detailChartHours !== h) { _detailChartHours = h; loadWebappChart(); }
+});
+
 function loadWebappChart() {
   var waId = _detailWebappId;
   if (!waId) return;
@@ -1242,40 +1246,49 @@ function loadWebappChart() {
       yTicks.push(Math.round(i * tickStep));
     }
 
-    function fmtTime(dateStr) {
-      var d = new Date(_toUtcIso(dateStr));
-      if (isNaN(d.getTime())) return dateStr;
-      var hours = _detailChartHours;
-      if (hours <= 24) return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
-      if (hours <= 168) return d.getMonth() + 1 + '/' + d.getDate() + ' ' + d.getHours().toString().padStart(2, '0') + ':00';
-      return d.getMonth() + 1 + '/' + d.getDate();
-    }
-
+    var minLabelSpacing = 65;
     var xLabels = [];
-    var labelCount = Math.min(6, withRt.length);
+    var maxLabels = Math.max(2, Math.floor(w / minLabelSpacing));
+    var labelCount = Math.min(maxLabels, withRt.length);
     for (var i = 0; i < labelCount; i++) {
       var idx = Math.round((i / (labelCount - 1)) * (withRt.length - 1));
-      xLabels.push({ idx: idx, label: fmtTime(withRt[idx].checked_at) });
+      xLabels.push(idx);
     }
 
     var svg = '';
     svg += '<svg width="' + totalW + '" height="' + (h + margin.bottom) + '" viewBox="0 0 ' + totalW + ' ' + (h + margin.bottom) + '" style="display:block;width:100%;height:' + (h + margin.bottom) + 'px">';
-
     svg += '<g transform="translate(' + margin.left + ',0)">';
 
     for (var i = 0; i < yTicks.length; i++) {
       var yVal = yTicks[i];
       var yPos = h - (yVal / yMax) * h;
       svg += '<line x1="0" y1="' + yPos + '" x2="' + w + '" y2="' + yPos + '" stroke="' + borderColor + '" stroke-width="0.5"/>';
-      svg += '<text x="-6" y="' + (yPos + 3) + '" fill="' + muted + '" font-size="10" text-anchor="end">' + yVal + '</text>';
+      svg += '<text x="-6" y="' + (yPos + 3) + '" fill="' + muted + '" font-size="9" text-anchor="end">' + yVal + '</text>';
     }
 
     svg += '<polygon fill="' + areaColor + '" points="' + areaPts + '"/>';
     svg += '<polyline fill="none" stroke="' + color + '" stroke-width="2" points="' + pts + '"/>';
 
     for (var i = 0; i < xLabels.length; i++) {
-      var xPos = (xLabels[i].idx / (withRt.length - 1)) * w;
-      svg += '<text x="' + xPos + '" y="' + (h + 16) + '" fill="' + muted + '" font-size="9" text-anchor="' + (i === 0 ? 'start' : i === xLabels.length - 1 ? 'end' : 'middle') + '">' + xLabels[i].label + '</text>';
+      var idx = xLabels[i];
+      var xPos = (idx / (withRt.length - 1)) * w;
+      var label = '';
+      var d = new Date(_toUtcIso(withRt[idx].checked_at));
+      if (!isNaN(d.getTime())) {
+        var hh = d.getHours().toString().padStart(2, '0');
+        var mm = d.getMinutes().toString().padStart(2, '0');
+        if (_detailChartHours <= 24) {
+          label = hh + ':' + mm;
+        } else if (_detailChartHours <= 168) {
+          label = (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hh + ':00';
+        } else {
+          label = (d.getMonth() + 1) + '/' + d.getDate();
+        }
+      } else {
+        label = withRt[idx].checked_at;
+      }
+      var anchor = i === 0 ? 'start' : i === xLabels.length - 1 ? 'end' : 'middle';
+      svg += '<text x="' + xPos + '" y="' + (h + 16) + '" fill="' + muted + '" font-size="8" text-anchor="' + anchor + '">' + label + '</text>';
     }
 
     svg += '</g></svg>';
