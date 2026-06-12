@@ -1273,7 +1273,7 @@ function loadWebappChart() {
       return mon + ' ' + p.day;
     }
 
-    var minLabelSpacing = 70;
+    var minLabelSpacing = 120;
     var xLabels = [];
     var maxLabels = Math.max(2, Math.floor(w / minLabelSpacing));
     var labelCount = Math.min(maxLabels, withRt.length);
