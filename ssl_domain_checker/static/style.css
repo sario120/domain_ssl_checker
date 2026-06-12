@@ -1479,7 +1479,11 @@ body.dark .badge-json { background: #e65100; color: #ffcc80; }
 .detail-last-check { font-size: 12px; color: var(--text-muted); text-align: right; }
 .detail-last-check .detail-label { display: inline; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
 .detail-section { margin-top: 20px; }
-.detail-section-header { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.detail-section-header { font-size: 14px; font-weight: 600; margin-bottom: 8px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+.chart-duration-bar { display:flex; gap:2px; }
+.chart-duration-btn { background:none; border:1px solid var(--border); color:var(--text-muted); padding:2px 8px; font-size:11px; border-radius:4px; cursor:pointer; transition:all 0.15s; font-family:inherit; }
+.chart-duration-btn:hover { background:var(--bg-hover); color:var(--text); }
+.chart-duration-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
 
 .uptime-period { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
 .uptime-period-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }

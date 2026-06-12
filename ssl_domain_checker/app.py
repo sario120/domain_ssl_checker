@@ -962,8 +962,9 @@ def check_all_webapps():
 @app.route('/api/webapps/<int:webapp_id>/results', methods=['GET'])
 @login_required
 def webapp_results(webapp_id):
+    hours = request.args.get('hours', None, type=int)
     days = request.args.get('days', 7, type=int)
-    history = models.get_webapp_check_history(webapp_id, days)
+    history = models.get_webapp_check_history(webapp_id, hours=hours or days * 24)
     return jsonify(history)
 
 

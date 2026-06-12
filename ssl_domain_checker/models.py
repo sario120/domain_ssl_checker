@@ -1422,9 +1422,9 @@ def save_webapp_check_result(webapp_id, result):
     conn.commit()
 
 
-def get_webapp_check_history(webapp_id, days=7):
+def get_webapp_check_history(webapp_id, hours=168):
     conn = get_db()
-    cutoff = (timezone_now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = (timezone_now() - datetime.timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
     rows = conn.execute(
         "SELECT checked_at, response_time_ms, status, status_code, error FROM webapp_results "
         "WHERE webapp_id=? AND checked_at>=? ORDER BY checked_at ASC",

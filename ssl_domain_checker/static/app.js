@@ -262,6 +262,10 @@ document.addEventListener('click', (e) => {
   else if (action === 'close-webapp-detail') {
     document.getElementById('webapp-detail-modal').classList.remove('open');
   }
+  else if (action === 'chart-duration') {
+    var h = parseInt(btn.dataset.hours);
+    if (h && _detailChartHours !== h) { _detailChartHours = h; loadWebappChart(); }
+  }
   else if (action === 'clear-webapp-filters') {
     document.getElementById('webapp-search').value = '';
     _webappFilter = 'all';
@@ -1173,7 +1177,59 @@ function formatDurationCompact(h, m, d, hr) {
   return parts.join(' ') || '0m';
 }
 
+var _detailWebappId = null;
+var _detailChartHours = 24;
+
+function loadWebappChart() {
+  var waId = _detailWebappId;
+  if (!waId) return;
+  var chartEl = document.getElementById('detail-wa-chart');
+  chartEl.innerHTML = 'Loading...';
+  document.getElementById('detail-wa-avg-rt').textContent = '—';
+  document.getElementById('detail-wa-min-rt').textContent = '—';
+  document.getElementById('detail-wa-max-rt').textContent = '—';
+  document.getElementById('detail-wa-last-rt').textContent = '—';
+
+  document.querySelectorAll('#chart-duration-bar .chart-duration-btn').forEach(function (b) {
+    b.classList.toggle('active', parseInt(b.dataset.hours) === _detailChartHours);
+  });
+
+  api('GET', '/api/webapps/' + waId + '/results?hours=' + _detailChartHours).then(function (data) {
+    var withRt = data.filter(function (d) { return d.response_time_ms != null; });
+    var rts = withRt.map(function (d) { return d.response_time_ms; });
+    if (rts.length < 2) {
+      chartEl.innerHTML = '<span class="text-muted">Not enough data for this period</span>';
+      return;
+    }
+    var sum = rts.reduce(function (a, b) { return a + b; }, 0);
+    document.getElementById('detail-wa-avg-rt').textContent = Math.round(sum / rts.length) + 'ms';
+    document.getElementById('detail-wa-min-rt').textContent = Math.min.apply(null, rts) + 'ms';
+    document.getElementById('detail-wa-max-rt').textContent = Math.max.apply(null, rts) + 'ms';
+    document.getElementById('detail-wa-last-rt').textContent = rts[rts.length - 1] + 'ms';
+
+    var w = chartEl.offsetWidth || 500;
+    var h = 120;
+    var pad = 4;
+    var max = Math.max.apply(null, rts);
+    var min = Math.min.apply(null, rts);
+    var range = max - min || 1;
+    var color = getComputedStyle(document.body).getPropertyValue('--primary').trim() || '#3b82f6';
+    var areaColor = color + '22';
+    var pts = rts.map(function (v, i) {
+      var x = (i / (rts.length - 1)) * (w - pad * 2) + pad;
+      var y = h - ((v - min) / range) * (h - pad * 2) - pad;
+      return x + ',' + y;
+    }).join(' ');
+    var areaPts = pad + ',' + (h - pad) + ' ' + pts + ' ' + (w - pad) + ',' + (h - pad);
+    chartEl.innerHTML = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" style="display:block;width:100%;height:120px">' +
+      '<polygon fill="' + areaColor + '" points="' + areaPts + '"/>' +
+      '<polyline fill="none" stroke="' + color + '" stroke-width="2" points="' + pts + '"/>' +
+      '</svg>';
+  }).catch(function () { chartEl.innerHTML = '<span class="text-muted">Failed to load</span>'; });
+}
+
 function openWebAppDetail(wa) {
+  _detailWebappId = wa.id;
   var modal = document.getElementById('webapp-detail-modal');
   document.getElementById('webapp-detail-title').textContent = wa.name || wa.url;
   document.getElementById('detail-wa-url').textContent = wa.url || '';
@@ -1217,11 +1273,6 @@ function openWebAppDetail(wa) {
     renderUptimeBar('30d');
     renderUptimeBar('365d');
 
-    document.getElementById('detail-wa-avg-rt').textContent = stats.avg_response_time_ms != null ? stats.avg_response_time_ms + 'ms' : '—';
-    document.getElementById('detail-wa-min-rt').textContent = stats.min_response_time_ms != null ? stats.min_response_time_ms + 'ms' : '—';
-    document.getElementById('detail-wa-max-rt').textContent = stats.max_response_time_ms != null ? stats.max_response_time_ms + 'ms' : '—';
-    document.getElementById('detail-wa-last-rt').textContent = webapp.response_time_ms != null ? webapp.response_time_ms + 'ms' : '—';
-
     if (stats.incidents && stats.incidents.length) {
       incidentsEl.innerHTML = stats.incidents.slice().reverse().map(function (inc) {
         var icon = inc.to === 'up' || inc.to === 'slow' ? '&#9673;' : '&#9888;';
@@ -1241,31 +1292,7 @@ function openWebAppDetail(wa) {
     incidentsEl.innerHTML = '';
   });
 
-  api('GET', '/api/webapps/' + wa.id + '/results?days=7').then(function (data) {
-    var rts = data.filter(function (d) { return d.response_time_ms != null; }).map(function (d) { return d.response_time_ms; });
-    if (rts.length < 2) {
-      chartEl.innerHTML = '<span class="text-muted">Not enough data</span>';
-    } else {
-      var w = chartEl.offsetWidth || 500;
-      var h = 120;
-      var pad = 4;
-      var max = Math.max.apply(null, rts);
-      var min = Math.min.apply(null, rts);
-      var range = max - min || 1;
-      var color = getComputedStyle(document.body).getPropertyValue('--primary').trim() || '#3b82f6';
-      var areaColor = color + '22';
-      var pts = rts.map(function (v, i) {
-        var x = (i / (rts.length - 1)) * (w - pad * 2) + pad;
-        var y = h - ((v - min) / range) * (h - pad * 2) - pad;
-        return x + ',' + y;
-      }).join(' ');
-      var areaPts = pad + ',' + (h - pad) + ' ' + pts + ' ' + (w - pad) + ',' + (h - pad);
-      chartEl.innerHTML = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" style="display:block;width:100%;height:120px">' +
-        '<polygon fill="' + areaColor + '" points="' + areaPts + '"/>' +
-        '<polyline fill="none" stroke="' + color + '" stroke-width="2" points="' + pts + '"/>' +
-        '</svg>';
-    }
-  }).catch(function () { chartEl.innerHTML = '<span class="text-muted">Failed to load</span>'; });
+  loadWebappChart();
 
   modal.classList.add('open');
 }

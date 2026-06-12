@@ -1296,7 +1296,18 @@
 
         <!-- Response time -->
         <div class="detail-section">
-          <div class="detail-section-header">Response time <span class="text-muted">(7 days)</span></div>
+          <div class="detail-section-header">
+            Response time
+            <div class="chart-duration-bar" id="chart-duration-bar">
+              <button class="chart-duration-btn" data-action="chart-duration" data-hours="1">1h</button>
+              <button class="chart-duration-btn" data-action="chart-duration" data-hours="6">6h</button>
+              <button class="chart-duration-btn" data-action="chart-duration" data-hours="12">12h</button>
+              <button class="chart-duration-btn active" data-action="chart-duration" data-hours="24">24h</button>
+              <button class="chart-duration-btn" data-action="chart-duration" data-hours="168">7d</button>
+              <button class="chart-duration-btn" data-action="chart-duration" data-hours="720">30d</button>
+              <button class="chart-duration-btn" data-action="chart-duration" data-hours="8760">365d</button>
+            </div>
+          </div>
           <div class="rt-stats-row">
             <div class="rt-stat"><span class="rt-stat-value" id="detail-wa-avg-rt">—</span><span class="rt-stat-label">Average</span></div>
             <div class="rt-stat"><span class="rt-stat-value" id="detail-wa-min-rt">—</span><span class="rt-stat-label">Minimum</span></div>
