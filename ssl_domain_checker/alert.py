@@ -56,7 +56,7 @@ def _get_custom_templates(settings):
         data = json.loads(raw)
         if not isinstance(data, dict):
             return {}
-        for tpl in ("ssl_alert", "domain_alert", "check_complete"):
+        for tpl in ("ssl_alert", "domain_alert", "webapp_alert", "check_complete"):
             if tpl in data:
                 entry = data[tpl]
                 if not isinstance(entry, dict) or not any(k in entry for k in ("subject", "body_html", "body_text")):
@@ -86,8 +86,11 @@ def _send_smtp(domain_name, status, ssl_days_left, domain_days_left, smtp_cfg, s
     custom = _get_custom_templates(settings)
     variables = _build_alert_variables(domain_name, status, ssl_days_left, domain_days_left, domain_data)
 
-    is_ssl = ssl_days_left is not None and (domain_days_left is None or ssl_days_left < domain_days_left)
-    tpl_name = "ssl_alert" if is_ssl else "domain_alert"
+    if ssl_days_left is None and domain_days_left is None:
+        tpl_name = "webapp_alert"
+    else:
+        is_ssl = ssl_days_left is not None and (domain_days_left is None or ssl_days_left < domain_days_left)
+        tpl_name = "ssl_alert" if is_ssl else "domain_alert"
 
     if tpl_name in custom:
         subject = email_templates.render_template(custom[tpl_name].get("subject", ""), variables)

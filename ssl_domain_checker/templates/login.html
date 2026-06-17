@@ -6,165 +6,589 @@
 <title>Vigil — Login</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
-  .login-wrapper {
-    min-height: 100vh;
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  .login-page {
     display: flex;
-    align-items: center;
+    min-height: 100vh;
+    background: var(--bg);
+  }
+
+  /* ─── Brand Panel ───────────────────────────────────────────── */
+  .brand-panel {
+    flex: 0 0 480px;
+    display: flex;
+    flex-direction: column;
     justify-content: center;
-    padding: 24px;
+    padding: 60px 48px;
     position: relative;
     overflow: hidden;
+    background: linear-gradient(135deg, #0c1628 0%, #162044 50%, #0f1d3d 100%);
   }
-  .login-wrapper::before {
+  body.light .brand-panel {
+    background: linear-gradient(135deg, #1a2a4a 0%, #2a4080 50%, #1a2a4a 100%);
+  }
+  .brand-panel::before {
     content: '';
     position: absolute;
     inset: -50%;
-    background: radial-gradient(ellipse at 30% 50%, rgba(59,130,246,0.08) 0%, transparent 50%),
-                radial-gradient(ellipse at 70% 50%, rgba(59,130,246,0.06) 0%, transparent 50%);
-    animation: bgShift 12s ease-in-out infinite alternate;
+    background:
+      radial-gradient(ellipse at 20% 30%, rgba(59,130,246,0.12) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 70%, rgba(99,102,241,0.08) 0%, transparent 50%);
+    animation: brandBgShift 20s ease-in-out infinite alternate;
     pointer-events: none;
   }
-  @keyframes bgShift {
+  @keyframes brandBgShift {
     0% { transform: translate(0, 0) rotate(0deg); }
-    100% { transform: translate(2%, 1%) rotate(3deg); }
+    100% { transform: translate(3%, 2%) rotate(4deg); }
   }
-  @keyframes loginFadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+  .brand-content {
+    position: relative;
+    z-index: 1;
+  }
+  .brand-logo {
+    margin-bottom: 32px;
+  }
+  .brand-logo img {
+    width: 200px;
+    height: auto;
+    border-radius: 8px;
+  }
+  .brand-tagline {
+    font-size: 16px;
+    color: rgba(255,255,255,0.7);
+    line-height: 1.6;
+    margin-bottom: 40px;
+    max-width: 380px;
+  }
+  .brand-features {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .brand-feature {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .brand-feature-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: rgba(59,130,246,0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  .brand-feature-text h4 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 2px;
+  }
+  .brand-feature-text p {
+    font-size: 13px;
+    color: rgba(255,255,255,0.55);
+    line-height: 1.4;
+  }
+  .brand-footer {
+    margin-top: auto;
+    padding-top: 40px;
+    font-size: 12px;
+    color: rgba(255,255,255,0.35);
+    position: relative;
+    z-index: 1;
+  }
+  .brand-footer a {
+    color: rgba(255,255,255,0.5);
+    text-decoration: none;
+  }
+  .brand-footer a:hover {
+    color: rgba(255,255,255,0.8);
+  }
+
+  /* ─── Form Panel ────────────────────────────────────────────── */
+  .form-panel {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 32px;
+    position: relative;
+  }
+  .form-container {
+    width: 100%;
+    max-width: 420px;
+    animation: formFadeIn 0.5s ease-out;
+  }
+  @keyframes formFadeIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .form-header {
+    margin-bottom: 32px;
+  }
+  .form-header h1 {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .form-header p {
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  .login-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 36px 32px 28px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
+  body.light .login-card {
+    box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+  }
+
+  .login-card.shake {
+    animation: loginShake 0.4s ease-out;
+  }
   @keyframes loginShake {
     0%, 100% { transform: translateX(0); }
     10%, 30%, 50%, 70%, 90% { transform: translateX(-6px); }
     20%, 40%, 60%, 80% { transform: translateX(6px); }
   }
-  .login-box { animation: loginFadeIn 0.4s ease-out;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 40px 36px 28px;
-    width: 100%;
-    max-width: 380px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-    position: relative;
-    z-index: 1;
+  .login-card.fade-out {
+    animation: loginFadeOut 0.25s ease-in forwards;
   }
-  .login-box.shake { animation: loginShake 0.4s ease-out; }
-  .login-logo { display: block; margin: 0 auto 20px; width: 200px; height: auto; border-radius: 8px; }
-  .login-header { text-align: center; margin-bottom: 24px; }
-  .login-header h1 {
-    font-size: 22px;
-    font-weight: 700;
-    color: var(--primary);
-    margin-bottom: 4px;
+  @keyframes loginFadeOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-10px); }
   }
-  .login-header p {
-    font-size: 13px;
-    color: var(--text-muted);
-    margin: 0;
-  }
-  .login-box .form-row { margin-bottom: 16px; }
-  .login-box .form-row.form-row-inline { display: flex; align-items: center; gap: 10px; }
-  .login-box .form-row.form-row-inline .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); }
-  .login-box .form-actions { margin-top: 20px; }
-  .login-box .btn-primary { width: 100%; padding: 10px; font-size: 15px; }
+
   .login-error {
     background: var(--red-bg);
     color: var(--red);
-    padding: 10px 14px;
-    border-radius: 6px;
+    padding: 12px 16px;
+    border-radius: 10px;
     font-size: 13px;
-    margin-bottom: 16px;
+    margin-bottom: 20px;
     display: none;
+    position: relative;
+    border: 1px solid rgba(239,68,68,0.2);
   }
-  .login-box .form-row input:focus {
+  .login-error.locked {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .login-error.locked .lock-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+  .login-error .attempts-left {
+    display: block;
+    font-size: 11px;
+    opacity: 0.7;
+    margin-top: 4px;
+  }
+  .err-close {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    background: none;
+    border: none;
+    color: inherit;
+    opacity: 0.5;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+  }
+  .err-close:hover { opacity: 1; }
+
+  .form-group {
+    margin-bottom: 20px;
+  }
+  .form-group label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    letter-spacing: 0.01em;
+  }
+  .form-group .input-wrapper {
+    position: relative;
+  }
+  .form-group input[type="text"],
+  .form-group input[type="password"] {
+    width: 100%;
+    padding: 11px 14px;
+    background: var(--bg-input);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-size: 15px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    font-family: inherit;
+  }
+  .form-group input:focus {
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
   }
-  .login-box .form-row input.error {
+  .form-group input.error {
     border-color: var(--red);
-    box-shadow: 0 0 0 3px rgba(239,68,68,0.15);
+    box-shadow: 0 0 0 3px rgba(239,68,68,0.12);
   }
+  .form-group input::placeholder {
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+
+  .form-group .toggle-pw {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 18px;
+    padding: 6px;
+    border-radius: 6px;
+    transition: background 0.15s, color 0.15s;
+    line-height: 1;
+  }
+  .form-group .toggle-pw:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+
+  .form-row-inline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+  }
+
+  /* ─── Toggle Switch ─────────────────────────────────────────── */
+  .toggle-switch {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .toggle-switch input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .toggle-switch .toggle-track {
+    width: 40px;
+    height: 22px;
+    background: var(--bg-input);
+    border: 1.5px solid var(--border);
+    border-radius: 11px;
+    position: relative;
+    transition: background 0.2s, border-color 0.2s;
+    flex-shrink: 0;
+  }
+  .toggle-switch .toggle-track::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background: var(--text-muted);
+    border-radius: 50%;
+    transition: transform 0.2s, background 0.2s;
+  }
+  .toggle-switch input:checked + .toggle-track {
+    background: var(--primary);
+    border-color: var(--primary);
+  }
+  .toggle-switch input:checked + .toggle-track::after {
+    transform: translateX(18px);
+    background: #ffffff;
+  }
+  .toggle-switch .toggle-label {
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .form-actions {
+    margin-bottom: 16px;
+  }
+  .btn-primary {
+    width: 100%;
+    padding: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    border-radius: 10px;
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    font-family: inherit;
+    letter-spacing: 0.01em;
+  }
+  .btn-primary:hover {
+    background: var(--primary-hover);
+  }
+  .btn-primary:active {
+    transform: scale(0.98);
+  }
+  .btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .btn-loading {
+    position: relative;
+    color: transparent !important;
+    pointer-events: none;
+  }
+  .btn-loading::after {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    top: 50%;
+    left: 50%;
+    margin: -9px 0 0 -9px;
+    border: 2.5px solid rgba(255,255,255,0.3);
+    border-top-color: #ffffff;
+    border-radius: 50%;
+    animation: btn-spin 0.6s linear infinite;
+  }
+  @keyframes btn-spin { to { transform: rotate(360deg); } }
+
   .login-hint {
     text-align: center;
-    margin-top: 16px;
+    font-size: 12px;
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+  .login-hint kbd {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 11px;
+    font-family: inherit;
+  }
+
+  .login-footer {
+    text-align: center;
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
     font-size: 12px;
     color: var(--text-muted);
     opacity: 0.6;
   }
-  .login-footer {
-    text-align: center;
+  .login-footer a {
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+  .login-footer a:hover {
+    color: var(--primary);
+  }
+
+  /* ─── Security Badge ────────────────────────────────────────── */
+  .security-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     margin-top: 20px;
-    padding-top: 16px;
-    border-top: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
     font-size: 11px;
     color: var(--text-muted);
-    opacity: 0.5;
+    opacity: 0.7;
   }
-  .login-box.fade-out { animation: loginFadeOut 0.25s ease-in forwards; }
-  @keyframes loginFadeOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-10px); } }
-  .login-error.locked { display: flex; align-items: center; gap: 8px; }
-  .login-error.locked .lock-icon { font-size: 18px; flex-shrink: 0; }
-  .login-error .attempts-left { display: block; font-size: 11px; opacity: 0.7; margin-top: 2px; }
-  .err-close {
-    position: absolute; top: 6px; right: 8px;
-    background: none; border: none; color: inherit; opacity: 0.5;
-    font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px;
+  .security-badge .lock-icon {
+    font-size: 12px;
   }
-  .err-close:hover { opacity: 1; }
-  .login-error { position: relative; }
-  .login-theme-toggle {
+
+  /* ─── Theme Toggle ──────────────────────────────────────────── */
+  .theme-toggle-btn {
     position: fixed;
-    top: 16px;
-    right: 16px;
+    top: 20px;
+    right: 20px;
     z-index: 10;
-    background: var(--bg-card);
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
     border: 1px solid var(--border);
+    background: var(--bg-card);
     color: var(--text-muted);
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
     cursor: pointer;
     font-size: 18px;
-    line-height: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.15s;
-    backdrop-filter: blur(4px);
+    transition: all 0.2s;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   }
-  .login-theme-toggle:hover { background: var(--bg-hover); color: var(--text); }
+  .theme-toggle-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+    border-color: var(--primary);
+  }
+
+  /* ─── Responsive ────────────────────────────────────────────── */
+  @media (max-width: 900px) {
+    .brand-panel {
+      flex: 0 0 320px;
+      padding: 40px 32px;
+    }
+  }
+  @media (max-width: 768px) {
+    .login-page {
+      flex-direction: column;
+    }
+    .brand-panel {
+      flex: none;
+      padding: 32px 24px;
+      min-height: auto;
+    }
+    .brand-features {
+      display: none;
+    }
+    .brand-logo img { width: 160px; }
+    .brand-tagline { font-size: 14px; margin-bottom: 0; }
+    .brand-footer { display: none; }
+    .form-panel { padding: 24px 16px; }
+    .login-card { padding: 24px 20px; }
+    .form-header { margin-bottom: 24px; }
+    .form-header h1 { font-size: 20px; }
+    .theme-toggle-btn { top: 12px; right: 12px; width: 36px; height: 36px; font-size: 16px; }
+  }
+  @media (max-width: 480px) {
+    .brand-panel { padding: 20px 16px; }
+    .brand-logo img { width: 140px; }
+    .brand-tagline { font-size: 13px; }
+    .login-card { border-radius: 12px; padding: 20px 16px; }
+    .form-group input[type="text"],
+    .form-group input[type="password"] { padding: 10px 12px; font-size: 14px; }
+    .security-badge { font-size: 10px; }
+    .form-header h1 { font-size: 18px; }
+  }
 </style>
 </head>
 <body>
-<div class="login-wrapper">
-  <button class="login-theme-toggle" id="login-theme-toggle" title="Toggle theme" type="button">🌙</button>
-  <div class="login-box">
-    <img src="/static/logo20.png" alt="Logo" class="login-logo">
-    <div class="login-header">
-      <h1>Vigil</h1>
-      <p>Sign in to your dashboard</p>
-    </div>
-    <div class="login-error" id="login-error"></div>
-    <form id="login-form">
-      <div class="form-row">
-        <label for="username">Username</label>
-        <input type="text" id="username" placeholder="Enter username" required autofocus>
+<div class="login-page">
+  <div class="brand-panel">
+    <div class="brand-content">
+      <div class="brand-logo">
+        <img src="/static/logo20.png" alt="Vigil">
       </div>
-      <div class="form-row">
-        <label for="password">Password</label>
-        <div class="password-field">
-          <input type="password" id="password" placeholder="Enter password" required>
-          <button type="button" class="toggle-pw" id="toggle-pw" tabindex="-1" aria-label="Toggle password visibility">👁️</button>
+      <p class="brand-tagline">Monitor SSL certificates, domain expirations, and web application uptime.</p>
+      <div class="brand-features">
+        <div class="brand-feature">
+          <div class="brand-feature-icon">🔐</div>
+          <div class="brand-feature-text">
+            <h4>SSL Certificate Monitoring</h4>
+            <p>Track expiry dates, detect weak ciphers, and get alerted before certificates expire.</p>
+          </div>
+        </div>
+        <div class="brand-feature">
+          <div class="brand-feature-icon">🌐</div>
+          <div class="brand-feature-text">
+            <h4>Domain Expiry Tracking</h4>
+            <p>Never lose a domain again with proactive renewal reminders and WHOIS monitoring.</p>
+          </div>
+        </div>
+        <div class="brand-feature">
+          <div class="brand-feature-icon">⚡</div>
+          <div class="brand-feature-text">
+            <h4>Web App Uptime Alerts</h4>
+            <p>Real-time HTTP/HTTPS checks with response time tracking and incident history.</p>
+          </div>
         </div>
       </div>
-      <div class="form-row form-row-inline">
-        <label class="checkbox-label"><input type="checkbox" id="remember-me"> Remember me</label>
-      </div>
-      <div class="form-actions">
-        <button type="submit" class="btn btn-primary" id="login-btn">Sign In</button>
-      </div>
-      <div class="login-hint">Press <kbd>Enter</kbd> to sign in · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> also works</div>
-    </form>
-    <div class="login-footer">Vigil SSL Checker · v1.0</div>
+    </div>
+    <div class="brand-footer">
+      &copy; 2026 Vigil &mdash; <a href="#">Privacy Policy</a> &middot; <a href="#">Terms of Service</a>
+    </div>
   </div>
+
+  <div class="form-panel">
+    <div class="form-container">
+      <div class="form-header">
+        <h1>Welcome back</h1>
+        <p>Sign in to your account to continue</p>
+      </div>
+
+      <div class="login-card" id="login-card">
+        <div class="login-error" id="login-error"></div>
+
+        <form id="login-form" autocomplete="off">
+          <div class="form-group">
+            <label for="username">Username</label>
+            <div class="input-wrapper">
+              <input type="text" id="username" placeholder="Enter your username" required autofocus autocomplete="username">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="password">Password</label>
+            <div class="input-wrapper">
+              <input type="password" id="password" placeholder="Enter your password" required autocomplete="current-password">
+              <button type="button" class="toggle-pw" id="toggle-pw" tabindex="-1" aria-label="Toggle password visibility">👁️</button>
+            </div>
+          </div>
+
+          <div class="form-row-inline">
+            <label class="toggle-switch">
+              <input type="checkbox" id="remember-me">
+              <span class="toggle-track"></span>
+              <span class="toggle-label">Remember me</span>
+            </label>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn-primary" id="login-btn">Sign In</button>
+          </div>
+
+          <div class="login-hint">
+            Press <kbd>Enter</kbd> to sign in &middot; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> also works
+          </div>
+        </form>
+
+        <div class="security-badge">
+          <span class="lock-icon">🔒</span>
+          Secured with end-to-end encryption
+        </div>
+      </div>
+
+      <div class="login-footer">
+        Vigil v1.0.0 &middot; <a href="#">Need help?</a>
+      </div>
+    </div>
+  </div>
+
+  <button class="theme-toggle-btn" id="login-theme-toggle" title="Toggle theme" type="button">🌙</button>
 </div>
+
 <script src="/static/login.js"></script>
 </body>
 </html>

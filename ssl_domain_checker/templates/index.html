@@ -44,66 +44,53 @@
           <button class="btn btn-secondary" data-action="check-all-full">Check All Domains</button>
           <button class="btn btn-secondary" data-action="check-all-ssl">Check All SSL</button>
           <button class="btn btn-secondary" data-action="export-csv">Export CSV</button>
-          <button class="btn btn-secondary" id="quick-add-toggle" data-action="toggle-quickadd">+ Quick Add</button>
         </div>
       </div>
 
-      <div class="dashboard-hero">
-        <div class="hero-card">
-          <span class="hero-card-label">Next scheduled check</span>
-          <strong class="hero-card-value" id="hero-next-check">Loading…</strong>
-          <div class="hero-card-note" id="hero-scheduler-note">Scheduler status will appear here.</div>
+      <div class="dash-strip">
+        <div class="dash-strip-item">
+          <span class="dash-strip-label">Next check</span>
+          <strong class="dash-strip-value" id="hero-next-check">—</strong>
         </div>
-        <div class="hero-card">
-          <span class="hero-card-label">Open issues</span>
-          <strong class="hero-card-value" id="hero-issue-count">0</strong>
-          <div class="hero-card-note">Combined SSL and domain alerts.</div>
+        <div class="dash-strip-divider"></div>
+        <div class="dash-strip-item">
+          <span class="dash-strip-label">Open issues</span>
+          <strong class="dash-strip-value" id="hero-issue-count">0</strong>
         </div>
-        <div class="hero-card hero-card-actions">
-          <span class="hero-card-label">Quick actions</span>
-          <div class="hero-card-buttons">
-            <button class="btn btn-secondary btn-sm" data-action="check-all-full">Check All</button>
-            <button class="btn btn-secondary btn-sm" data-action="check-all-ssl">Check SSL</button>
-          </div>
+        <div class="dash-strip-divider"></div>
+        <div class="dash-strip-item dash-strip-scheduler">
+          <span class="dash-strip-label">Scheduler</span>
+          <span class="dash-strip-value">
+            <span class="dot" id="scheduler-dot"></span>
+            <span id="scheduler-text">Loading...</span>
+          </span>
         </div>
-      </div>
-
-      <div class="scheduler-status" id="scheduler-status">
-        <span class="dot" id="scheduler-dot"></span>
-        <span id="scheduler-text">Loading scheduler status...</span>
-        <span id="last-refreshed" style="margin-left:auto;font-size:11px"></span>
+        <div class="dash-strip-fill"></div>
+        <div class="dash-strip-item">
+          <span class="dash-strip-refreshed" id="last-refreshed"></span>
+        </div>
       </div>
 
       <div id="dash-changed" class="dash-changed"></div>
 
       <div class="dash-layout">
         <div class="dash-main">
-          <div class="dash-health-row">
-            <div class="dash-health">
-              <span class="health-label">Domain Health</span>
-              <span class="health-pct" id="dash-domain-health-pct">—</span>
-              <div class="health-bar-bg"><div class="health-bar" id="dash-domain-health-bar"></div></div>
-            </div>
-            <div class="dash-health">
-              <span class="health-label">SSL Health</span>
-              <span class="health-pct" id="dash-ssl-health-pct">—</span>
-              <div class="health-bar-bg"><div class="health-bar" id="dash-ssl-health-bar"></div></div>
-            </div>
-            <div class="dash-health">
-              <span class="health-label">Reachable</span>
-              <span class="health-pct" id="dash-reachable-pct">—</span>
-              <div class="health-bar-bg"><div class="health-bar" id="dash-reachable-bar"></div></div>
-            </div>
-            <div class="dash-health">
-              <span class="health-label">API Health</span>
-              <span class="health-pct" id="dash-webapp-health-pct">—</span>
-              <div class="health-bar-bg"><div class="health-bar" id="dash-webapp-health-bar"></div></div>
+          <div class="dash-empty" id="dash-empty" style="display:none">
+            <div class="empty-state">
+              <h3>Welcome to Vigil</h3>
+              <p>Add your first domain to start monitoring SSL certificates and domain expirations.</p>
+              <div class="empty-actions">
+                <button class="btn btn-primary" data-action="toggle-quickadd">Add a Domain</button>
+              </div>
             </div>
           </div>
 
           <div class="dash-grid">
             <div class="dash-card">
-              <div class="dash-card-header">Domains</div>
+              <div class="dash-card-header">
+                <span>Domains</span>
+                <span class="dash-card-pct" id="dash-domain-health-pct">—</span>
+              </div>
               <div class="dash-card-body">
                 <div class="dash-stat"><span class="dash-num" id="dash-full-total">0</span> total</div>
                 <div class="dash-stat healthy" data-action="filter-domains" data-type="full" data-status="healthy"><span class="dash-num" id="dash-full-healthy">0</span> Healthy</div>
@@ -114,7 +101,10 @@
               </div>
             </div>
             <div class="dash-card">
-              <div class="dash-card-header">SSL Certificates</div>
+              <div class="dash-card-header">
+                <span>SSL Certificates</span>
+                <span class="dash-card-pct" id="dash-ssl-health-pct">—</span>
+              </div>
               <div class="dash-card-body">
                 <div class="dash-stat"><span class="dash-num" id="dash-ssl-total">0</span> total</div>
                 <div class="dash-stat healthy" data-action="filter-domains" data-type="ssl_only" data-status="healthy"><span class="dash-num" id="dash-ssl-healthy">0</span> Healthy</div>
@@ -125,12 +115,17 @@
               </div>
             </div>
             <div class="dash-card" style="cursor:pointer" data-action="go-webapps">
-              <div class="dash-card-header">Web Apps</div>
+              <div class="dash-card-header">
+                <span>Web Apps</span>
+                <span class="dash-card-pct" id="dash-webapp-health-pct">—</span>
+              </div>
               <div class="dash-card-body">
                 <div class="dash-stat"><span class="dash-num" id="dash-webapp-total">0</span> total</div>
                 <div class="dash-stat healthy"><span class="dash-num" id="dash-webapp-up">0</span> Up</div>
-                <div class="dash-stat danger"><span class="dash-num" id="dash-webapp-down">0</span> Down / Slow</div>
+                <div class="dash-stat danger"><span class="dash-num" id="dash-webapp-down">0</span> Down</div>
+                <div class="dash-stat warning"><span class="dash-num" id="dash-webapp-slow">0</span> Slow</div>
                 <div class="dash-stat pending"><span class="dash-num" id="dash-webapp-unknown">0</span> Unknown</div>
+                <div class="dash-stat" style="opacity:0.6"><span class="dash-num" id="dash-webapp-paused">0</span> Paused</div>
               </div>
             </div>
           </div>
@@ -142,33 +137,39 @@
         </div>
 
         <div class="dash-sidebar">
-          <div class="dash-sparkline" id="dash-system-info">
+          <div class="dash-sidebar-card" id="dash-system-info">
             <div class="sparkline-header collapsible-header" data-collapse="sysinfo">
               <span class="collapse-arrow">&#9660;</span>
               <h4>System Information</h4>
             </div>
-            <div class="collapsible-body"><table class="sysinfo-table" id="sysinfo-table"></table></div>
+            <div class="collapsible-body"><div class="sysinfo-card" id="sysinfo-card"></div></div>
           </div>
 
-          <div class="dash-sparkline" id="dash-sparkline">
-            <div class="sparkline-header collapsible-header" data-collapse="sparkline">
+          <div class="dash-sidebar-card" id="dash-webapp-failures">
+            <div class="sparkline-header collapsible-header" data-collapse="wa-failures">
               <span class="collapse-arrow">&#9660;</span>
-              <h4>7-Day Health Trend</h4>
-              <div class="sparkline-legend" id="sparkline-legend"></div>
+              <h4>Web App Issues</h4>
             </div>
-            <div class="collapsible-body" style="position:relative"><canvas id="sparkline-canvas" height="140"></canvas><div class="sparkline-tooltip" id="sparkline-tooltip"></div></div>
+            <div class="collapsible-body"><div class="top-list" id="webapp-failures-list"></div></div>
           </div>
 
-          <div class="dash-top-expiring" id="dash-ssl-expiring">
-            <h3 class="collapsible-header" data-collapse="ssl-exp"><span class="collapse-arrow">&#9660;</span> SSL Expiring Soon <span class="dash-counts" style="font-weight:400">(≤30d)</span></h3>
-            <div class="collapsible-body"><div class="top-list" id="ssl-expiring-list"></div></div>
-          </div>
-          <div class="dash-top-expiring" id="dash-domain-expiring">
-            <h3 class="collapsible-header" data-collapse="domain-exp"><span class="collapse-arrow">&#9660;</span> Domain Expiring Soon <span class="dash-counts" style="font-weight:400">(≤90d)</span></h3>
-            <div class="collapsible-body"><div class="top-list" id="domain-expiring-list"></div></div>
+          <div class="dash-sidebar-card" id="dash-expiring">
+            <div class="sparkline-header collapsible-header" data-collapse="expiring">
+              <span class="collapse-arrow">&#9660;</span>
+              <h4>Expiring Soon</h4>
+            </div>
+            <div class="collapsible-body">
+              <div class="expiry-tabs" id="expiry-tabs">
+                <button class="expiry-tab active" data-tab="ssl">SSL</button>
+                <button class="expiry-tab" data-tab="domain">Domain</button>
+              </div>
+              <div class="top-list" id="ssl-expiring-list"></div>
+              <div class="top-list" id="domain-expiring-list" style="display:none"></div>
+            </div>
           </div>
         </div>
       </div>
+      <button class="fab" data-action="toggle-quickadd" title="Quick Add">+</button>
     </section>
 
     <!-- Domains View -->
@@ -394,11 +395,12 @@
           <input type="text" id="webapp-search" class="domain-search-input" placeholder="Search web apps...">
           <button class="btn btn-secondary" data-action="toggle-view-webapps" title="Switch to table view"><span class="view-toggle-icon">&#9776;</span><span class="view-toggle-label">Table</span></button>
           <div class="actions-dropdown">
-            <button class="btn btn-secondary" data-action="toggle-actions-dropdown">Actions &#9662;</button>
-            <div class="actions-dropdown-content">
-              <button data-action="check-all-webapps">&#x21bb; Check All</button>
-              <button data-action="webapp-export-csv">&#x2197; Export CSV</button>
-              <button data-action="import">&#x21E7; Import</button>
+            <button class="btn btn-secondary" data-action="toggle-actions-dropdown" aria-haspopup="true" aria-expanded="false">Actions &#9662;</button>
+            <div class="actions-dropdown-content" role="menu" tabindex="-1">
+              <button role="menuitem" data-action="check-all-webapps"><span class="dropdown-item-icon">&#x21bb;</span><span class="dropdown-item-label">Check All</span></button>
+              <button role="menuitem" data-action="webapp-export-csv"><span class="dropdown-item-icon">&#x2197;</span><span class="dropdown-item-label">Export CSV</span></button>
+              <hr class="actions-divider" role="separator">
+              <button role="menuitem" data-action="import"><span class="dropdown-item-icon">&#x21E7;</span><span class="dropdown-item-label">Import</span></button>
             </div>
           </div>
           <button class="btn btn-primary" data-action="add-webapp">+ Add Web App</button>
@@ -423,6 +425,8 @@
         <label class="bulk-select-all"><input type="checkbox" id="select-all-webapp"> Select All</label>
         <span id="webapp-bulk-count">0 selected</span>
         <button class="btn btn-sm btn-secondary" data-action="webapp-bulk-check">Check Selected</button>
+        <button class="btn btn-sm btn-secondary" data-action="webapp-bulk-edit">Edit Selected</button>
+        <button class="btn btn-sm btn-secondary" data-action="webapp-bulk-compare">Compare</button>
         <button class="btn btn-sm btn-danger" data-action="webapp-bulk-delete">Delete Selected</button>
         <button class="btn btn-sm btn-secondary" data-action="webapp-bulk-deselect">Clear</button>
       </div>
@@ -453,6 +457,7 @@
               <label class="col-check"><input type="checkbox" data-col="col-response" checked> Response Time</label>
               <label class="col-check"><input type="checkbox" data-col="col-code" checked> Status Code</label>
               <label class="col-check"><input type="checkbox" data-col="col-uptime" checked> Uptime %</label>
+              <label class="col-check"><input type="checkbox" data-col="col-notes" checked> Notes</label>
               <label class="col-check"><input type="checkbox" data-col="col-sparkline" checked> Activity</label>
               <label class="col-check"><input type="checkbox" data-col="col-checked" checked> Last Checked</label>
               <label class="col-check"><input type="checkbox" data-col="col-actions" checked> Actions</label>
@@ -513,7 +518,7 @@
         <button class="settings-tab" data-stab="users" tabindex="0">Users</button>
         <button class="settings-tab" data-stab="security" tabindex="0">Security</button>
         <button class="settings-tab" data-stab="apikeys" tabindex="0">API Keys</button>
-        <button class="settings-tab" data-stab="backups" tabindex="0">Backups</button>
+
         <button class="settings-tab" data-stab="emailtpl" tabindex="0">Email Templates</button>
       </div>
 
@@ -742,22 +747,6 @@
           </div>
         </div>
         <div class="api-keys-list" id="api-keys-list"></div>
-      </div>
-
-      <!-- Backups -->
-      <div class="settings-pane" id="stab-backups">
-        <div class="pane-header">
-          <div>
-            <h3>Database Backups</h3>
-            <p class="pane-subtitle">Download snapshots or restore a previous copy of the SQLite database.</p>
-          </div>
-          <div class="header-actions">
-            <button class="btn btn-secondary" data-action="refresh-backups">Refresh</button>
-            <button class="btn btn-primary" data-action="create-backup">+ Create Backup</button>
-          </div>
-        </div>
-        <p class="pane-note">Daily backups run at 03:00. Maximum <span id="max-backups-info">30</span> backups retained.</p>
-        <div class="backups-list" id="backups-list"></div>
       </div>
 
       <!-- Email Templates -->
@@ -1122,7 +1111,7 @@
     <div class="modal-backdrop" data-action="close-compare-modal"></div>
     <div class="modal-content modal-lg">
       <div class="modal-header">
-        <h3>Compare Domains</h3>
+        <h3 id="compare-modal-title">Compare Domains</h3>
         <button class="modal-close" data-action="close-compare-modal">&times;</button>
       </div>
       <div id="compare-content" class="compare-grid"></div>
@@ -1218,6 +1207,10 @@
           <label for="webapp-notes">Notes</label>
           <textarea id="webapp-notes" rows="2" placeholder="Optional notes"></textarea>
         </div>
+        <div class="form-row">
+          <label for="webapp-tags">Tags (comma separated)</label>
+          <input type="text" id="webapp-tags" placeholder="production, critical, api">
+        </div>
         <div class="form-row form-checkbox-row">
           <label><input type="checkbox" id="webapp-notify-down" checked> Notify on Down</label>
         </div>
@@ -1232,6 +1225,49 @@
     </div>
   </div>
 
+  <!-- Webapp Bulk Edit Modal -->
+  <div id="webapp-bulk-edit-modal" class="modal">
+    <div class="modal-backdrop" data-action="close-webapp-bulk-edit"></div>
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <h3>Bulk Edit Web Apps</h3>
+        <button class="modal-close" data-action="close-webapp-bulk-edit">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted" style="font-size:13px;margin-bottom:12px" id="webapp-bulk-edit-count">0 selected</p>
+        <div class="form-row">
+          <label for="webapp-bulk-check-interval">Check Interval</label>
+          <select id="webapp-bulk-check-interval">
+            <option value="">— No change —</option>
+            <option value="60">1 minute</option>
+            <option value="300">5 minutes</option>
+            <option value="900">15 minutes</option>
+            <option value="1800">30 minutes</option>
+            <option value="3600">1 hour</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label for="webapp-bulk-timeout">Timeout (seconds)</label>
+          <input type="number" id="webapp-bulk-timeout" placeholder="— No change —" min="1" max="120">
+        </div>
+        <div class="form-row form-checkbox-row">
+          <label><input type="checkbox" id="webapp-bulk-set-active"> Set active</label>
+        </div>
+        <div class="form-row form-checkbox-row">
+          <label><input type="checkbox" id="webapp-bulk-set-inactive"> Set paused</label>
+        </div>
+        <div class="form-row">
+          <label for="webapp-bulk-tags">Tags (comma separated, replaces existing)</label>
+          <input type="text" id="webapp-bulk-tags" placeholder="— No change —">
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" data-action="close-webapp-bulk-edit">Cancel</button>
+          <button class="btn btn-primary" data-action="submit-webapp-bulk-edit">Apply</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Webapp Detail Modal -->
   <div id="webapp-detail-modal" class="modal">
     <div class="modal-backdrop" data-action="close-webapp-detail"></div>
@@ -1240,6 +1276,7 @@
         <div>
           <h3 id="webapp-detail-title">Web App Details</h3>
           <span class="text-muted" id="detail-wa-url" style="font-size:12px"></span>
+          <div id="detail-wa-sparkline" class="detail-header-sparkline" style="height:24px;width:120px;margin-top:4px"></div>
         </div>
         <button class="modal-close" data-action="close-webapp-detail">&times;</button>
       </div>
@@ -1256,6 +1293,11 @@
             <span class="detail-label" style="margin-left:8px">Checked every</span>
             <span id="detail-wa-interval"></span>
           </div>
+        </div>
+
+        <!-- Recent checks stat -->
+        <div class="detail-recent-checks" style="display:flex;gap:16px;padding:8px 0;font-size:13px">
+          <span>Last 25 checks: <strong id="detail-wa-recent-checks">—</strong></span>
         </div>
 
         <!-- Uptime grid -->

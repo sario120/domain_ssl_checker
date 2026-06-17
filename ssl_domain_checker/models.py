@@ -98,7 +98,19 @@ def is_valid_domain(url):
     return bool(re.match(
         r'^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$',
         hostname
-    ))
+    )    )
+
+
+def normalise_url(url):
+    url = url.strip()
+    if url.startswith(('http://', 'https://')):
+        return url
+    host = url.split('/')[0].split(':')[0]
+    if re.match(r'^\d{1,3}(\.\d{1,3}){3}$', host) or host in ('localhost',) or '.' not in host:
+        url = 'http://' + url
+    else:
+        url = 'https://' + url
+    return url
 
 
 def _connect():
@@ -423,6 +435,7 @@ _MIGRATION_DOMAIN_COLS = frozenset({
 _MIGRATION_SETTINGS_COLS = frozenset({
     'last_summary_sent', 'slack_webhook_url', 'slack_enabled',
     'zulip_webhook_url', 'zulip_enabled',
+    'backup_schedule_hour', 'backup_schedule_minute', 'max_backups',
 })
 
 
@@ -472,17 +485,20 @@ def _run_sqlite_migrations():
     if "client_ip" not in lcols:
         conn.execute("ALTER TABLE logs ADD COLUMN client_ip TEXT")
     scols = {r[1] for r in conn.execute("PRAGMA table_info(settings)").fetchall()}
-    for col in ("last_summary_sent",):
+    for col in ("last_summary_sent", "backup_schedule_hour", "backup_schedule_minute", "max_backups"):
         if col not in scols:
             if col not in _MIGRATION_SETTINGS_COLS:
                 raise ValueError(f"Invalid migration column: {col}")
-            conn.execute(f"ALTER TABLE settings ADD COLUMN {col} TEXT")
+            dtype = "INTEGER" if col in ("backup_schedule_hour", "backup_schedule_minute", "max_backups") else "TEXT"
+            conn.execute(f"ALTER TABLE settings ADD COLUMN {col} {dtype}")
     wcols = {r[1] for r in conn.execute("PRAGMA table_info(webapps)").fetchall()}
     if "last_alerted" not in wcols:
         conn.execute("ALTER TABLE webapps ADD COLUMN last_alerted TEXT")
     if "status_changed_at" not in wcols:
         conn.execute("ALTER TABLE webapps ADD COLUMN status_changed_at TEXT")
         conn.execute("UPDATE webapps SET status_changed_at=COALESCE(last_checked, created_at) WHERE status_changed_at IS NULL")
+    if "tags" not in wcols:
+        conn.execute("ALTER TABLE webapps ADD COLUMN tags TEXT DEFAULT ''")
     conn.commit()
 
 
@@ -520,6 +536,12 @@ def _run_postgres_migrations():
         conn.execute("ALTER TABLE logs ADD COLUMN client_ip TEXT")
     if 'last_summary_sent' not in db.table_columns('settings'):
         conn.execute("ALTER TABLE settings ADD COLUMN last_summary_sent TIMESTAMPTZ")
+    if 'backup_schedule_hour' not in db.table_columns('settings'):
+        conn.execute("ALTER TABLE settings ADD COLUMN backup_schedule_hour INTEGER DEFAULT 3")
+    if 'backup_schedule_minute' not in db.table_columns('settings'):
+        conn.execute("ALTER TABLE settings ADD COLUMN backup_schedule_minute INTEGER DEFAULT 0")
+    if 'max_backups' not in db.table_columns('settings'):
+        conn.execute("ALTER TABLE settings ADD COLUMN max_backups INTEGER DEFAULT 30")
 
     for col, dtype in [
         ('slack_webhook_url', 'TEXT'), ('slack_enabled', 'BOOLEAN'),
@@ -534,6 +556,8 @@ def _run_postgres_migrations():
         conn.execute("ALTER TABLE webapps ADD COLUMN last_alerted TIMESTAMPTZ")
     if 'status_changed_at' not in db.table_columns('webapps'):
         conn.execute("ALTER TABLE webapps ADD COLUMN status_changed_at TIMESTAMPTZ")
+    if 'tags' not in db.table_columns('webapps'):
+        conn.execute("ALTER TABLE webapps ADD COLUMN tags TEXT DEFAULT ''")
 
     conn.commit()
 
@@ -1107,7 +1131,7 @@ def update_security_settings(data):
 
 def get_api_keys():
     conn = get_db()
-    rows = conn.execute("SELECT id, name, key_masked, created_at, last_used FROM api_keys WHERE revoked=0 ORDER BY created_at DESC").fetchall()
+    rows = conn.execute("SELECT id, name, key_masked, created_at, last_used FROM api_keys WHERE revoked=FALSE ORDER BY created_at DESC").fetchall()
     return [dict(r) for r in rows]
 
 
@@ -1124,14 +1148,14 @@ def create_api_key(name):
 
 def revoke_api_key(key_id):
     conn = get_db()
-    conn.execute("UPDATE api_keys SET revoked=1 WHERE id=?", (key_id,))
+    conn.execute("UPDATE api_keys SET revoked=TRUE WHERE id=?", (key_id,))
     conn.commit()
 
 
 def verify_api_key(key):
     key_hash = hashlib.sha256(key.encode()).hexdigest()
     conn = get_db()
-    row = conn.execute("SELECT id FROM api_keys WHERE key_hash=? AND revoked=0", (key_hash,)).fetchone()
+    row = conn.execute("SELECT id FROM api_keys WHERE key_hash=? AND revoked=FALSE", (key_hash,)).fetchone()
     if row:
         conn.execute("UPDATE api_keys SET last_used=? WHERE id=?", (timezone_now_str(), row['id']))
         conn.commit()
@@ -1294,6 +1318,16 @@ def count_domains():
     return conn.execute("SELECT COUNT(*) AS cnt FROM domains").fetchone()['cnt']
 
 
+def count_domains_full():
+    conn = get_db()
+    return conn.execute("SELECT COUNT(*) AS cnt FROM domains WHERE type='full'").fetchone()['cnt']
+
+
+def count_domains_ssl():
+    conn = get_db()
+    return conn.execute("SELECT COUNT(*) AS cnt FROM domains WHERE type='ssl_only'").fetchone()['cnt']
+
+
 def get_domain_status_counts():
     """Return a dict of domain status → count for Prometheus metrics."""
     conn = get_db()
@@ -1317,10 +1351,50 @@ def get_domain_check_history(domain_id, days=7):
 
 # ─── Webapps ────────────────────────────────────────────────────
 
-def get_webapps():
+def get_webapps(search='', status='', sort_by='name', sort_dir='asc', page=1, page_size=0):
     conn = get_db()
-    rows = conn.execute("SELECT * FROM webapps ORDER BY name ASC").fetchall()
+    conditions = []
+    params = []
+    if search:
+        conditions.append("(name LIKE ? OR url LIKE ?)")
+        params.extend([f'%{search}%', f'%{search}%'])
+    if status and status != 'all':
+        conditions.append("status=?")
+        params.append(status)
+    where = "WHERE " + " AND ".join(conditions) if conditions else ""
+    order_col = sort_by if sort_by in ('name', 'url', 'status', 'response_time_ms', 'last_checked', 'total_checks') else 'name'
+    if sort_by == 'uptime_pct':
+        order_clause = "ORDER BY (CAST(successful_checks AS REAL) / MAX(total_checks, 1)) " + sort_dir
+    else:
+        order_clause = f"ORDER BY {order_col} {sort_dir}"
+    query = f"SELECT * FROM webapps {where} {order_clause}, name ASC"
+    if page_size > 0:
+        offset = (page - 1) * page_size
+        query += f" LIMIT ? OFFSET ?"
+        params.extend([page_size, offset])
+    rows = conn.execute(query, params).fetchall()
     return [dict(r) for r in rows]
+
+
+def count_webapps_filtered(search='', status=''):
+    conn = get_db()
+    conditions = []
+    params = []
+    if search:
+        conditions.append("(name LIKE ? OR url LIKE ?)")
+        params.extend([f'%{search}%', f'%{search}%'])
+    if status and status != 'all':
+        conditions.append("status=?")
+        params.append(status)
+    where = "WHERE " + " AND ".join(conditions) if conditions else ""
+    row = conn.execute(f"SELECT COUNT(*) AS cnt FROM webapps {where}", params).fetchone()
+    return row['cnt'] if row else 0
+
+
+def get_webapp_by_url(url):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM webapps WHERE url=?", (url,)).fetchone()
+    return dict(row) if row else None
 
 
 def get_webapp(webapp_id):
@@ -1331,16 +1405,16 @@ def get_webapp(webapp_id):
 
 def add_webapp(name, url, method='GET', expected_status=200, expected_body=None,
                timeout=10, headers=None, body=None, check_interval=300,
-               notify_on_down=True, notify_on_recovery=True, notes=''):
+               notify_on_down=True, notify_on_recovery=True, notes='', tags=''):
     conn = get_db()
     try:
         cur = conn.execute(
             "INSERT INTO webapps (name, url, method, expected_status, expected_body, "
-            "timeout, headers, body, check_interval, notify_on_down, notify_on_recovery, notes) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            "timeout, headers, body, check_interval, notify_on_down, notify_on_recovery, notes, tags) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
             (name, url, method, expected_status, expected_body,
              timeout, headers, body, check_interval,
-             bool(notify_on_down), bool(notify_on_recovery), notes)
+             bool(notify_on_down), bool(notify_on_recovery), notes, tags)
         )
         new_id = cur.fetchone()['id']
         conn.commit()
@@ -1353,7 +1427,7 @@ def add_webapp(name, url, method='GET', expected_status=200, expected_body=None,
 
 def update_webapp(webapp_id, **kwargs):
     allowed = frozenset({'name', 'url', 'method', 'expected_status', 'expected_body',
-                         'timeout', 'headers', 'body', 'check_interval', 'notes',
+                         'timeout', 'headers', 'body', 'check_interval', 'notes', 'tags',
                          'notify_on_down', 'notify_on_recovery', 'is_active'})
     sets = []
     vals = []
@@ -1366,10 +1440,11 @@ def update_webapp(webapp_id, **kwargs):
         vals.append(v)
     if not sets:
         return False
-    vals.append(webapp_id)
     conn = get_db()
+    vals.append(timezone_now_str())
+    vals.append(webapp_id)
     conn.execute(f"UPDATE webapps SET {', '.join(sets)}, updated_at={db.placeholder()} WHERE id=?",
-                 (*vals, timezone_now_str()))
+                 vals)
     conn.commit()
     return True
 
@@ -1507,6 +1582,13 @@ def get_webapp_detail_stats(webapp_id):
         (webapp_id,)
     ).fetchone()
 
+    recent = conn.execute(
+        "SELECT status FROM webapp_results WHERE webapp_id=? "
+        "ORDER BY checked_at DESC LIMIT 25", (webapp_id,)
+    ).fetchall()
+    recent_total = len(recent)
+    recent_up = sum(1 for r in recent if r['status'] in ('up', 'slow'))
+
     return {
         'current_duration_seconds': current_duration,
         'uptime': uptime_data,
@@ -1515,6 +1597,8 @@ def get_webapp_detail_stats(webapp_id):
         'avg_response_time_ms': round(rt_stats['avg_r'], 1) if rt_stats and rt_stats['avg_r'] else None,
         'min_response_time_ms': round(rt_stats['min_r'], 1) if rt_stats and rt_stats['min_r'] else None,
         'max_response_time_ms': round(rt_stats['max_r'], 1) if rt_stats and rt_stats['max_r'] else None,
+        'recent_checks_total': recent_total,
+        'recent_checks_up': recent_up,
     }
 
 
@@ -1528,9 +1612,29 @@ def get_webapp_stats():
     rows = conn.execute(
         "SELECT COALESCE(status, 'unknown') AS st, COUNT(*) AS cnt FROM webapps GROUP BY st"
     ).fetchall()
-    stats = {'up': 0, 'down': 0, 'slow': 0, 'unknown': 0}
+    paused_check = "CAST(is_active AS INTEGER) = 0 OR is_active IS NULL"
+    paused_row = conn.execute(f"""
+        SELECT COUNT(*) AS cnt FROM webapps WHERE {paused_check}
+    """).fetchone()
+    stats = {'up': 0, 'down': 0, 'slow': 0, 'unknown': 0, 'paused': paused_row['cnt'] if paused_row else 0}
+    total = 0
     for r in rows:
         if r['st'] in stats:
             stats[r['st']] = r['cnt']
-    stats['total'] = sum(stats.values())
+            total += r['cnt']
+    stats['total'] = total
     return stats
+
+
+def get_webapp_recent_failures(limit=5):
+    conn = get_db()
+    order = "ORDER BY w.last_checked DESC NULLS LAST" if db.DB_TYPE == 'postgresql' else "ORDER BY w.last_checked DESC"
+    active_check = "CAST(w.is_active AS INTEGER) = 1"
+    rows = conn.execute(f"""
+        SELECT w.id, w.name, w.url, w.status, w.last_checked,
+            (SELECT status FROM webapp_results WHERE webapp_id = w.id ORDER BY checked_at DESC LIMIT 1) as last_status
+        FROM webapps w
+        WHERE {active_check} AND COALESCE(w.status, 'unknown') IN ('down', 'slow')
+        {order} LIMIT ?
+    """, (limit,)).fetchall()
+    return [dict(r) for r in rows]

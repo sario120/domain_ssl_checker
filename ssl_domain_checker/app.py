@@ -396,7 +396,9 @@ def prometheus_metrics():
 @app.route('/api/dashboard/summary', methods=['GET'])
 @login_required
 def dashboard_summary():
-    return jsonify(models.get_dashboard_summary())
+    data = models.get_dashboard_summary()
+    data['webapp_failures'] = models.get_webapp_recent_failures(limit=5)
+    return jsonify(data)
 
 
 # ─── Auth ─────────────────────────────────────────────────────
@@ -780,7 +782,18 @@ def check_all():
 @app.route('/api/webapps', methods=['GET'])
 @login_required
 def list_webapps():
-    apps = models.get_webapps()
+    search = request.args.get('search', '', type=str).strip()
+    status = request.args.get('status', 'all', type=str)
+    sort_by = request.args.get('sort_by', 'name', type=str)
+    sort_dir = request.args.get('sort_dir', 'asc', type=str)
+    page = request.args.get('page', 0, type=int)
+    page_size = request.args.get('page_size', 0, type=int)
+    if sort_dir not in ('asc', 'desc'):
+        sort_dir = 'asc'
+    apps = models.get_webapps(search=search, status=status, sort_by=sort_by, sort_dir=sort_dir, page=page, page_size=page_size)
+    if page > 0:
+        total = models.count_webapps_filtered(search=search, status=status)
+        return jsonify({'webapps': apps, 'total': total, 'page': page, 'page_size': page_size})
     return jsonify(apps)
 
 
@@ -789,9 +802,12 @@ def list_webapps():
 @csrf_required
 @json_body('name', 'url')
 def create_webapp(data):
+    tags = data.get('tags', '')
+    if isinstance(tags, list):
+        tags = json.dumps(tags)
     result = models.add_webapp(
         name=data['name'].strip(),
-        url=data['url'].strip(),
+        url=models.normalise_url(data['url'].strip()),
         method=data.get('method', 'GET'),
         expected_status=data.get('expected_status', 200),
         expected_body=data.get('expected_body'),
@@ -802,6 +818,7 @@ def create_webapp(data):
         notify_on_down=data.get('notify_on_down', True),
         notify_on_recovery=data.get('notify_on_recovery', True),
         notes=data.get('notes', ''),
+        tags=tags,
     )
     if not result.get('ok'):
         return api_error(result.get('error', 'Failed to create webapp'), 400)
@@ -818,7 +835,7 @@ def update_webapp(webapp_id):
     data = request.get_json(silent=True) or {}
     allowed_keys = ('name', 'url', 'method', 'expected_status', 'expected_body',
                     'timeout', 'check_interval', 'notify_on_down', 'notify_on_recovery',
-                    'notes', 'is_active')
+                    'notes', 'tags', 'is_active')
     kwargs = {}
     if 'headers' in data:
         kwargs['headers'] = json.dumps(data['headers']) if isinstance(data['headers'], dict) else data['headers']
@@ -850,6 +867,7 @@ def bulk_delete_webapps(data):
         app_data = models.get_webapp(wid)
         if app_data:
             models.delete_webapp(wid)
+            models.add_log('delete', f'Bulk delete: {app_data["name"]} ({app_data["url"]})', username=current_username())
     return jsonify({'ok': True})
 
 
@@ -892,10 +910,6 @@ def _maybe_send_webapp_alert(wa, result, settings, previous_status=None):
     if not should_alert:
         return
 
-    last = models.parse_dt(wa.get('last_alerted'))
-    if last and (models.timezone_now() - last).total_seconds() < models.ALERT_COOLDOWN_SECONDS:
-        return
-
     settings = settings or models.get_settings()
     try:
         errors = send_alerts(wa['name'] + ' (' + wa['url'] + ')',
@@ -915,6 +929,36 @@ def _maybe_send_webapp_alert(wa, result, settings, previous_status=None):
     else:
         models.add_log('webapp_alert', f'Webapp alert sent for {wa["name"]}: {new_status}')
         models.update_webapp_last_alerted(wa['id'])
+
+
+@app.route('/api/webapps/bulk-check', methods=['POST'])
+@admin_required
+@csrf_required
+@json_body('ids')
+def bulk_check_webapps(data):
+    ids = data['ids']
+    if not ids:
+        return jsonify({'message': 'No webapps to check', 'results': []})
+    apps = [models.get_webapp(wid) for wid in ids]
+    apps = [a for a in apps if a]
+    if not apps:
+        return jsonify({'message': 'No webapps found', 'results': []})
+    settings = models.get_settings()
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futures = {pool.submit(run_check_for_webapp, a, 1): a for a in apps}
+        results = []
+        for future in as_completed(futures):
+            r = future.result()
+            results.append(r)
+    for r in results:
+        wa = next((a for a in apps if a['id'] == r['webapp_id']), None)
+        if wa:
+            models.save_webapp_check(wa['id'], r)
+            models.save_webapp_check_result(wa['id'], r)
+            models.add_log('webapp_check', f'Bulk check: {wa["name"]} - {r["status"]}', username=current_username())
+            previous_status = wa.get('status')
+            _maybe_send_webapp_alert(wa, r, settings, previous_status)
+    return jsonify({'message': f'Checked {len(results)} webapps', 'results': results})
 
 
 @app.route('/api/webapps/<int:webapp_id>/check', methods=['POST'])
@@ -957,6 +1001,20 @@ def check_all_webapps():
             previous_status = wa.get('status')
             _maybe_send_webapp_alert(wa, r, settings, previous_status)
     return jsonify({'message': f'Checked {len(results)} webapps', 'results': results})
+
+
+@app.route('/api/webapps/batch-sparklines', methods=['POST'])
+@login_required
+def webapp_batch_sparklines():
+    data = request.get_json(silent=True) or {}
+    ids = data.get('ids', [])
+    if not ids:
+        return jsonify({})
+    result = {}
+    for wid in ids:
+        history = models.get_webapp_check_history(wid, hours=168)
+        result[str(wid)] = history
+    return jsonify(result)
 
 
 @app.route('/api/webapps/<int:webapp_id>/results', methods=['GET'])
@@ -1060,10 +1118,22 @@ def import_webapps():
             return api_error('Send JSON with "webapps" array, or upload a .csv/.txt/.json file')
 
     results = {'added': 0, 'skipped': 0, 'errors': [], 'added_list': [], 'skipped_list': []}
+    seen_urls = set()
     for item in items:
-        url = item.get('url', '').strip() if isinstance(item, dict) else str(item).strip()
-        if not url:
+        raw = item.get('url', '').strip() if isinstance(item, dict) else str(item).strip()
+        if not raw:
             continue
+        url = models.normalise_url(raw)
+        if url in seen_urls:
+            results['skipped'] += 1
+            results['skipped_list'].append(url)
+            continue
+        existing = models.get_webapp_by_url(url)
+        if existing:
+            results['skipped'] += 1
+            results['skipped_list'].append(url)
+            continue
+        seen_urls.add(url)
         name = item.get('name', url).strip() if isinstance(item, dict) else url
         method = item.get('method', 'GET') if isinstance(item, dict) else 'GET'
         expected_status = int(item.get('expected_status', 200)) if isinstance(item, dict) else 200
@@ -1127,7 +1197,10 @@ def webapp_logs():
 @app.route('/api/scheduler/status', methods=['GET'])
 @login_required
 def scheduler_status():
-    return jsonify({'next_run': get_next_scheduled_check()})
+    result = get_next_scheduled_check()
+    if result is None:
+        return jsonify({})
+    return jsonify(result)
 
 
 # ─── System Info ────────────────────────────────────────────────
@@ -1135,14 +1208,18 @@ def scheduler_status():
 @login_required
 def system_info():
     t0 = time.perf_counter()
+    last_check = models.get_last_check_run()
     info = {
         'version': VERSION,
         'uptime_seconds': int(time.time() - APP_START_TIME),
         'app_started_at': datetime.fromtimestamp(APP_START_TIME).strftime('%Y-%m-%d %H:%M:%S'),
         'total_users': models.count_users(),
-        'total_domains': models.count_domains(),
+        'total_domains': models.count_domains_full(),
+        'total_ssl_certs': models.count_domains_ssl(),
         'total_webapps': models.count_webapps(),
         'scheduler_active': get_next_scheduled_check() is not None,
+        'last_check_at': last_check['completed_at'] if last_check and last_check.get('completed_at') else None,
+        'last_check_status': last_check['status'] if last_check else None,
     }
     elapsed = int((time.perf_counter() - t0) * 1000)
     info['api_response_time_ms'] = elapsed
@@ -1562,6 +1639,37 @@ def delete_backup(filename):
     if os.path.exists(meta_path):
         os.remove(meta_path)
     return jsonify({'message': 'Backup deleted'})
+
+
+@app.route('/api/backups/schedule', methods=['POST'])
+@admin_required
+@csrf_required
+def update_backup_schedule():
+    data = request.get_json(silent=True) or {}
+    hour = data.get('hour')
+    minute = data.get('minute')
+    max_backups = data.get('max_backups')
+    updates = {}
+    if hour is not None:
+        hour = int(hour)
+        if hour < 0 or hour > 23:
+            return api_error('Hour must be 0-23', 400)
+        updates['backup_schedule_hour'] = hour
+    if minute is not None:
+        minute = int(minute)
+        if minute < 0 or minute > 59:
+            return api_error('Minute must be 0-59', 400)
+        updates['backup_schedule_minute'] = minute
+    if max_backups is not None:
+        max_backups = int(max_backups)
+        if max_backups < 1 or max_backups > 365:
+            return api_error('Max backups must be 1-365', 400)
+        updates['max_backups'] = max_backups
+    if updates:
+        models.update_settings(updates)
+    backup.schedule_backup(sched_mod.scheduler)
+    models.add_log('audit', 'Backup schedule updated', username=current_username())
+    return jsonify({'message': 'Backup schedule updated', 'next_backup_at': backup.get_db_info().get('next_backup_at')})
 
 
 # ─── Email Templates ───────────────────────────────────────────

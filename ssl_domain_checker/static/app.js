@@ -70,7 +70,7 @@ function activateView(viewName) {
   if (viewName === 'backups') loadBackupsView();
   if (viewName === 'domains') loadDomains('full', true);
   if (viewName === 'sslcerts') loadDomains('ssl_only', true);
-  if (viewName === 'webapps') loadWebApps(true);
+  if (viewName === 'webapps') { loadWebappViewPrefs(); loadWebApps(true); }
 }
 
 document.querySelectorAll('.nav-tab').forEach(tab => {
@@ -167,7 +167,6 @@ document.addEventListener('click', (e) => {
   else if (action === 'import-settings') { document.getElementById('settings-import-input').click(); }
   else if (action === 'bulk-revoke-apikeys') { bulkRevokeApiKeys(); }
   else if (action === 'refresh-api-keys') { loadApiKeys(true); }
-  else if (action === 'refresh-backups') { loadBackups(true); }
   else if (action === 'refresh-backups-view') { loadBackupsView(); }
   else if (action === 'create-backup-view' || action === 'open-backup-create') { document.getElementById('backup-create-pane').style.display = ''; document.getElementById('backup-notes-input').value = ''; }
   else if (action === 'close-backup-create') { document.getElementById('backup-create-pane').style.display = 'none'; }
@@ -184,8 +183,28 @@ document.addEventListener('click', (e) => {
 
   // ─── Web Apps actions ──────────────────────────────────────────
   else if (action === 'toggle-actions-dropdown') {
-    var dd = btn.closest('.actions-dropdown');
-    if (dd) dd.classList.toggle('open');
+    e.stopPropagation();
+    var dropdown = btn.nextElementSibling;
+    var isOpen = dropdown.style.display !== 'none';
+    document.querySelectorAll('.actions-dropdown-content').forEach(function (d) { d.style.display = 'none'; });
+    btn.setAttribute('aria-expanded', '' + !isOpen);
+    if (!isOpen) {
+      dropdown.style.display = 'block';
+      dropdown.style.position = 'fixed';
+      var br = btn.getBoundingClientRect();
+      var dw = dropdown.offsetWidth || 180;
+      var dh = dropdown.offsetHeight || 200;
+      var left = br.right - dw;
+      if (left < 8) left = br.left;
+      if (left + dw > window.innerWidth - 8) left = window.innerWidth - dw - 8;
+      var top = br.bottom + 4;
+      if (top + dh > window.innerHeight - 8) top = br.top - dh - 4;
+      if (top < 8) top = 8;
+      dropdown.style.left = left + 'px';
+      dropdown.style.top = top + 'px';
+      dropdown.focus();
+    }
+    return;
   }
   else if (action === 'add-webapp') { openWebAppModal(null); }
   else if (action === 'close-webapp-modal') { closeWebAppModal(); }
@@ -194,7 +213,9 @@ document.addEventListener('click', (e) => {
     var label = btn.querySelector('.view-toggle-label');
     if (label) label.textContent = _webappViewMode === 'table' ? 'Cards' : 'Table';
     btn.querySelector('.view-toggle-icon').innerHTML = _webappViewMode === 'table' ? '&#9776;' : '&#9632;';
+    btn.title = _webappViewMode === 'table' ? 'Switch to card view' : 'Switch to table view';
     applyWebAppFilters(_webappsCache || []);
+    saveWebappViewPrefs();
   }
   else if (action === 'check-all-webapps') {
     api('POST', '/api/webapps/check-all').then(function () { loadWebApps(true); toast('All web apps checked'); }).catch(function (e) { toast(e.message, 'error'); });
@@ -223,7 +244,7 @@ document.addEventListener('click', (e) => {
   else if (action === 'webapp-bulk-check') {
     var ids = Array.from(_selectedWebapps);
     if (!ids.length) return;
-    Promise.all(ids.map(function (id) { return api('POST', '/api/webapps/' + id + '/check'); })).then(function () {
+    api('POST', '/api/webapps/bulk-check', { ids: ids }).then(function () {
       _selectedWebapps.clear(); loadWebApps(true); toast('Checked ' + ids.length + ' web apps');
     }).catch(function (e) { toast(e.message, 'error'); });
   }
@@ -236,6 +257,64 @@ document.addEventListener('click', (e) => {
     }).catch(function (e) { toast(e.message, 'error'); });
   }
   else if (action === 'webapp-bulk-deselect') { _selectedWebapps.clear(); applyWebAppFilters(_webappsCache || []); }
+  else if (action === 'webapp-bulk-edit') {
+    var count = _selectedWebapps.size;
+    if (!count) return;
+    document.getElementById('webapp-bulk-edit-count').textContent = count + ' selected';
+    document.getElementById('webapp-bulk-edit-modal').classList.add('open');
+  }
+  else if (action === 'close-webapp-bulk-edit') {
+    document.getElementById('webapp-bulk-edit-modal').classList.remove('open');
+  }
+  else if (action === 'webapp-bulk-compare') {
+    var ids = Array.from(_selectedWebapps);
+    if (ids.length < 2) { toast('Select at least 2 web apps to compare', 'error'); return; }
+    var apps = (_webappsCache || []).filter(function (a) { return _selectedWebapps.has(a.id); });
+    var container = document.getElementById('compare-content');
+    document.getElementById('compare-modal-title').textContent = 'Compare ' + apps.length + ' Web Apps';
+    container.innerHTML = apps.map(function (a) {
+      var st = a.status || 'unknown';
+      var cls = st === 'up' ? 'healthy' : st === 'down' ? 'expired' : st === 'slow' ? 'warning' : 'pending';
+      var tags = '';
+      if (a.tags) { try { tags = JSON.parse(a.tags).join(', '); } catch (e) { tags = a.tags; } }
+      return '<div class="compare-card">' +
+        '<h4>' + escHtml(a.name) + '</h4>' +
+        '<div class="compare-row"><span class="compare-label">URL</span><span class="compare-value">' + escHtml(a.url) + '</span></div>' +
+        '<div class="compare-row"><span class="compare-label">Status</span><span class="compare-value ' + cls + '">' + st.toUpperCase() + '</span></div>' +
+        '<div class="compare-row"><span class="compare-label">Response Time</span><span class="compare-value">' + (a.response_time_ms != null ? a.response_time_ms + 'ms' : '—') + '</span></div>' +
+        '<div class="compare-row"><span class="compare-label">Status Code</span><span class="compare-value">' + (a.last_status_code || '—') + '</span></div>' +
+        '<div class="compare-row"><span class="compare-label">Uptime</span><span class="compare-value">' + (a.total_checks ? Math.round((a.successful_checks || 0) / a.total_checks * 100) + '%' : '—') + '</span></div>' +
+        '<div class="compare-row"><span class="compare-label">Method</span><span class="compare-value">' + (a.method || 'GET') + '</span></div>' +
+        '<div class="compare-row"><span class="compare-label">Interval</span><span class="compare-value">' + (a.check_interval ? (a.check_interval >= 3600 ? Math.round(a.check_interval / 3600) + 'h' : a.check_interval >= 60 ? Math.round(a.check_interval / 60) + 'm' : a.check_interval + 's') : '—') + '</span></div>' +
+        '<div class="compare-row"><span class="compare-label">Tags</span><span class="compare-value">' + escHtml(tags || '—') + '</span></div>' +
+        '<div class="compare-row"><span class="compare-label">Notes</span><span class="compare-value">' + (a.notes ? escHtml(a.notes.substring(0, 50)) : '—') + '</span></div>' +
+        '<div class="compare-row"><span class="compare-label">Last Checked</span><span class="compare-value">' + (a.last_checked ? relativeTime(a.last_checked) : 'Never') + '</span></div>' +
+        '</div>';
+    }).join('');
+    document.getElementById('compare-modal').classList.add('open');
+  }
+  else if (action === 'submit-webapp-bulk-edit') {
+    var ids = Array.from(_selectedWebapps);
+    if (!ids.length) return;
+    var payload = {};
+    var interval = document.getElementById('webapp-bulk-check-interval').value;
+    if (interval) payload.check_interval = parseInt(interval);
+    var timeout = document.getElementById('webapp-bulk-timeout').value.trim();
+    if (timeout) payload.timeout = parseInt(timeout);
+    var setActive = document.getElementById('webapp-bulk-set-active').checked;
+    var setInactive = document.getElementById('webapp-bulk-set-inactive').checked;
+    if (setActive) payload.is_active = true;
+    else if (setInactive) payload.is_active = false;
+    var tags = document.getElementById('webapp-bulk-tags').value.trim();
+    if (tags) payload.tags = JSON.stringify(tags.split(',').map(function (t) { return t.trim(); }).filter(Boolean));
+    if (Object.keys(payload).length === 0) { toast('No changes selected', 'error'); return; }
+    Promise.all(ids.map(function (id) { return api('PUT', '/api/webapps/' + id, payload); })).then(function () {
+      document.getElementById('webapp-bulk-edit-modal').classList.remove('open');
+      _selectedWebapps.clear();
+      loadWebApps(true);
+      toast('Updated ' + ids.length + ' web apps');
+    }).catch(function (e) { toast(e.message, 'error'); });
+  }
   else if (action === 'toggle-columns-webapp') {
     var dd = document.getElementById('col-dropdown-webapp');
     if (dd) dd.style.display = dd.style.display === 'none' ? '' : 'none';
@@ -387,12 +466,13 @@ document.addEventListener('click', (e) => {
       dropdown.style.position = 'fixed';
       const btnRect = toggle.getBoundingClientRect();
       const ddW = dropdown.offsetWidth || 180;
+      const ddH = dropdown.offsetHeight || 200;
       let left = btnRect.right - ddW;
       if (left < 8) left = btnRect.left;
+      if (left + ddW > window.innerWidth - 8) left = window.innerWidth - ddW - 8;
       let top = btnRect.bottom + 4;
-      if (top + dropdown.offsetHeight > window.innerHeight) {
-        top = btnRect.top - dropdown.offsetHeight - 4;
-      }
+      if (top + ddH > window.innerHeight - 8) top = btnRect.top - ddH - 4;
+      if (top < 8) top = 8;
       dropdown.style.left = left + 'px';
       dropdown.style.top = top + 'px';
     }
@@ -404,10 +484,35 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// ─── Dropdown keyboard navigation ─────────────────────────────
+document.addEventListener('keydown', function (e) {
+  var openDropdown = document.querySelector('.kebab-dropdown[style*="display: block"], .actions-dropdown-content[style*="display: block"]');
+  if (!openDropdown) return;
+  var items = Array.from(openDropdown.querySelectorAll('button:not([disabled])'));
+  var currentIndex = items.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    var next = (currentIndex + 1) % items.length;
+    items[next].focus();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    var prev = (currentIndex - 1 + items.length) % items.length;
+    items[prev].focus();
+  } else if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    if (currentIndex >= 0) items[currentIndex].click();
+  } else if (e.key === 'Escape') {
+    document.querySelectorAll('.kebab-dropdown, .actions-dropdown-content').forEach(function (d) { d.style.display = 'none'; });
+    document.querySelectorAll('[data-action="toggle-actions-dropdown"]').forEach(function (b) { b.setAttribute('aria-expanded', 'false'); });
+    var toggle = document.querySelector('[data-action="toggle-kebab"], [data-action="toggle-actions-dropdown"]');
+    if (toggle) toggle.focus();
+  }
+});
+
 // ─── Global keydown ──────────────────────────────────────────────
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    document.querySelectorAll('.kebab-dropdown').forEach(d => d.style.display = 'none');
+    document.querySelectorAll('.kebab-dropdown, .actions-dropdown-content').forEach(function (d) { d.style.display = 'none'; });
     document.querySelectorAll('.column-dropdown').forEach(d => d.style.display = 'none');
     ['domain-modal', 'user-modal', 'confirm-modal', 'cert-modal', 'import-modal', 'bulk-notes-modal', 'compare-modal', 'bulk-tags-modal'].forEach(id => {
       const el = document.getElementById(id);
@@ -538,14 +643,16 @@ document.getElementById('page-size-ssl').addEventListener('change', (e) => {
 });
 document.getElementById('page-size-webapp').addEventListener('change', (e) => {
   _webappPagination.size = parseInt(e.target.value);
-  _webappPagination.page = 0;
+  _webappPagination.page = 1;
   applyWebAppFilters(_webappsCache || []);
 });
 
-// ─── Webapp search ──────────────────────────────────────────────
+// ─── Webapp search (debounced) ──────────────────────────────────
+let _webappSearchTimer = null;
 document.getElementById('webapp-search').addEventListener('input', function () {
-  _webappPagination.page = 0;
-  applyWebAppFilters(_webappsCache || []);
+  _webappPagination.page = 1;
+  clearTimeout(_webappSearchTimer);
+  _webappSearchTimer = setTimeout(function () { applyWebAppFilters(_webappsCache || []); }, 200);
 });
 document.getElementById('webapp-filters').addEventListener('click', (e) => {
   var btn = e.target.closest('[data-webapp-filter]');
@@ -553,33 +660,56 @@ document.getElementById('webapp-filters').addEventListener('click', (e) => {
   document.querySelectorAll('#webapp-filters .log-filter').forEach(function (b) { b.classList.remove('active'); });
   btn.classList.add('active');
   _webappFilter = btn.dataset.webappFilter;
-  _webappPagination.page = 0;
+  _webappPagination.page = 1;
   applyWebAppFilters(_webappsCache || []);
+  saveWebappViewPrefs();
 });
 document.getElementById('sort-webapp-select').addEventListener('change', (e) => {
   var opt = e.target.options[e.target.selectedIndex];
   _webappSort.key = opt.value;
   _webappSort.dir = parseInt(opt.dataset.dir) || 1;
-  _webappPagination.page = 0;
+  _webappPagination.page = 1;
   applyWebAppFilters(_webappsCache || []);
+  saveWebappViewPrefs();
 });
 document.getElementById('pagination-webapp').addEventListener('click', (e) => {
   var btn = e.target.closest('[data-action^="page-"]');
   if (!btn) return;
   var action = btn.dataset.action;
-  if (action === 'page-first-webapp') _webappPagination.page = 0;
-  else if (action === 'page-prev-webapp') _webappPagination.page = Math.max(0, _webappPagination.page - 1);
+  if (action === 'page-first-webapp') _webappPagination.page = 1;
+  else if (action === 'page-prev-webapp') _webappPagination.page = Math.max(1, _webappPagination.page - 1);
   else if (action === 'page-next-webapp') _webappPagination.page = _webappPagination.page + 1;
   else if (action === 'page-last-webapp') _webappPagination.page = 9999;
   applyWebAppFilters(_webappsCache || []);
 });
 
-// ─── Webapp bulk select ─────────────────────────────────────────
+// ─── Webapp bulk select (with shift-click range) ───────────────
+let _lastCheckedWebapp = null;
 document.addEventListener('change', (e) => {
   var cb = e.target.closest('.webapp-select');
   if (!cb) return;
-  if (cb.checked) _selectedWebapps.add(parseInt(cb.value));
-  else _selectedWebapps.delete(parseInt(cb.value));
+  var id = parseInt(cb.value);
+  if (cb.checked) _selectedWebapps.add(id);
+  else _selectedWebapps.delete(id);
+
+  if (e.shiftKey && _lastCheckedWebapp !== null) {
+    var allIds = (_webappsCache || []).map(function (a) { return a.id; });
+    var lastIdx = allIds.indexOf(_lastCheckedWebapp);
+    var curIdx = allIds.indexOf(id);
+    if (lastIdx !== -1 && curIdx !== -1) {
+      var start = lastIdx < curIdx ? lastIdx : curIdx;
+      var end = lastIdx < curIdx ? curIdx : lastIdx;
+      for (var i = start; i <= end; i++) {
+        var rid = allIds[i];
+        if (rid === undefined) continue;
+        if (cb.checked) _selectedWebapps.add(rid);
+        else _selectedWebapps.delete(rid);
+        var otherCb = document.querySelector('.webapp-select[value="' + rid + '"]');
+        if (otherCb) otherCb.checked = cb.checked;
+      }
+    }
+  }
+  _lastCheckedWebapp = id;
   updateWebappBulkToolbar();
 });
 document.getElementById('select-all-webapp').addEventListener('change', (e) => {
@@ -593,15 +723,18 @@ document.getElementById('select-all-webapp').addEventListener('change', (e) => {
   updateWebappBulkToolbar();
 });
 
-// ─── Webapp column visibility ──────────────────────────────────
+// ─── Webapp column visibility (persisted) ──────────────────────
+let _webappVisibleCols = {};
 document.addEventListener('change', (e) => {
   var colCheck = e.target.closest('#col-dropdown-webapp [data-col]');
   if (!colCheck) return;
-  var tbody = document.getElementById('webapp-table-body');
+  var checked = colCheck.checked;
   var cols = colCheck.dataset.col;
+  _webappVisibleCols[cols] = checked;
   document.querySelectorAll('#webapp-table .' + cols).forEach(function (el) {
-    el.style.display = colCheck.checked ? '' : 'none';
+    el.style.display = checked ? '' : 'none';
   });
+  saveWebappViewPrefs();
 });
 
 // ─── Webapp form submit ─────────────────────────────────────────
@@ -619,6 +752,7 @@ document.getElementById('webapp-form').addEventListener('submit', async (e) => {
     headers: document.getElementById('webapp-headers').value.trim() || null,
     body: document.getElementById('webapp-body').value || null,
     notes: document.getElementById('webapp-notes').value.trim(),
+    tags: document.getElementById('webapp-tags').value.split(',').map(function (t) { return t.trim(); }).filter(Boolean),
     notify_on_down: document.getElementById('webapp-notify-down').checked,
     notify_on_recovery: document.getElementById('webapp-notify-recovery').checked,
   };
@@ -704,7 +838,7 @@ document.addEventListener('click', (e) => {
         sel.selectedIndex = i; break;
       }
     }
-    _webappPagination.page = 0;
+    _webappPagination.page = 1;
     applyWebAppFilters(_webappsCache || []);
     return;
   }
@@ -840,6 +974,7 @@ document.getElementById('ssl-group-by-status').addEventListener('change', (e) =>
 document.getElementById('webapp-group-by-status').addEventListener('change', (e) => {
   _webappGroupByStatus = e.target.checked;
   applyWebAppFilters(_webappsCache || []);
+  saveWebappViewPrefs();
 });
 
 // Search filtering (debounced)
@@ -870,7 +1005,6 @@ function switchSettingsTab(stab) {
   try { localStorage.setItem('vigil-settings-tab', stab); } catch (e) {}
   if (stab === 'users') loadUsers();
   if (stab === 'apikeys') loadApiKeys();
-  if (stab === 'backups') loadBackups();
   if (stab === 'emailtpl') loadEmailTemplates();
 }
 
@@ -1028,7 +1162,7 @@ async function loadDashboard(force = false) {
     const [summary, sched, sysinfo] = await Promise.all([
       api('GET', '/api/dashboard/summary'),
       api('GET', '/api/scheduler/status'),
-      api('GET', '/api/system/info')
+      api('GET', '/api/system/info'),
     ]);
     _dashSummaryCache.data = summary;
     _dashSummaryCache.ts = now;
@@ -1076,21 +1210,28 @@ document.getElementById('quickadd-form').addEventListener('submit', function (e)
 });
 
 function renderDashboardSummary(summary, sched) {
-  const { full_stats: fStats, ssl_stats: sStats, full_count, ssl_count, reachable, total, ssl_expiring, domain_expiring, expiry_buckets, last_check, snapshots, webapp_stats } = summary;
-  const wStats = webapp_stats || { up: 0, down: 0, slow: 0, unknown: 0, total: 0 };
+  const { full_stats: fStats, ssl_stats: sStats, full_count, ssl_count, reachable, total, ssl_expiring, domain_expiring, expiry_buckets, last_check, webapp_stats, webapp_failures } = summary;
+  const wStats = webapp_stats || { up: 0, down: 0, slow: 0, unknown: 0, total: 0, paused: 0 };
 
   document.getElementById('dash-counts').textContent = `${full_count} domains + ${ssl_count} SSL`;
 
   // Health scores
   const domainPct = full_count > 0 ? Math.round((fStats.healthy / full_count) * 100) : 0;
   const sslPct = ssl_count > 0 ? Math.round((sStats.healthy / ssl_count) * 100) : 0;
-  const reachPct = total > 0 ? Math.round((reachable / total) * 100) : 0;
-
-  setHealth('dash-domain-health', domainPct);
-  setHealth('dash-ssl-health', sslPct);
-  setHealth('dash-reachable', reachPct);
   const webappPct = wStats.total > 0 ? Math.round((wStats.up / wStats.total) * 100) : 0;
-  setHealth('dash-webapp-health', webappPct);
+
+  document.getElementById('dash-domain-health-pct').textContent = domainPct + '%';
+  document.getElementById('dash-ssl-health-pct').textContent = sslPct + '%';
+  document.getElementById('dash-webapp-health-pct').textContent = webappPct + '%';
+
+  // Empty state
+  const hasData = full_count > 0 || ssl_count > 0 || wStats.total > 0;
+  const emptyEl = document.getElementById('dash-empty');
+  const gridEl = document.querySelector('.dash-grid');
+  const bucketsEl = document.getElementById('dash-buckets');
+  if (emptyEl) emptyEl.style.display = hasData ? 'none' : '';
+  if (gridEl) gridEl.style.display = hasData ? '' : 'none';
+  if (bucketsEl) bucketsEl.style.display = hasData ? '' : 'none';
 
   // Changed indicator
   if (_prevHealth !== null) {
@@ -1123,19 +1264,20 @@ function renderDashboardSummary(summary, sched) {
   animStat('dash-ssl-pending', sStats.pending);
   animStat('dash-webapp-total', wStats.total);
   animStat('dash-webapp-up', wStats.up);
-  animStat('dash-webapp-down', wStats.down + wStats.slow);
+  animStat('dash-webapp-down', wStats.down);
+  animStat('dash-webapp-slow', wStats.slow);
   animStat('dash-webapp-unknown', wStats.unknown);
+  animStat('dash-webapp-paused', wStats.paused);
 
   const issueCount = fStats.expired + fStats.error + sStats.expired + sStats.error + wStats.down + wStats.slow;
   document.getElementById('hero-issue-count').textContent = issueCount;
   document.getElementById('hero-next-check').textContent = sched && sched.next_run ? formatCountdownText(sched.next_run) : 'Not scheduled';
-  document.getElementById('hero-scheduler-note').textContent = sched && sched.next_run ? `Next run in ${formatDuration(new Date(sched.next_run) - Date.now())}` : 'Scheduler active — waiting for next run.';
 
   renderSchedulerStatus(sched, last_check);
-  renderSparkline(snapshots);
   renderExpiringList('ssl-expiring-list', ssl_expiring);
   renderExpiringList('domain-expiring-list', domain_expiring);
   renderExpiryBuckets(expiry_buckets);
+  renderWebappFailures(webapp_failures);
 }
 
 function formatUptime(seconds) {
@@ -1151,20 +1293,44 @@ function formatUptime(seconds) {
 }
 
 function renderSystemInfo(info) {
-  var tbody = document.getElementById('sysinfo-table');
-  if (!tbody) return;
-  var rows = [
-    ['Version', escHtml(info.version)],
-    ['Uptime', formatUptime(info.uptime_seconds)],
-    ['Started at', info.app_started_at],
-    ['API response time', info.api_response_time_ms + 'ms'],
-    ['Total domains', info.total_domains],
-    ['Total web apps', info.total_webapps],
-    ['Total users', info.total_users],
-    ['Scheduler', info.scheduler_active ? 'Active' : 'Idle'],
+  var el = document.getElementById('sysinfo-card');
+  if (!el) return;
+  var lastCheckStr = info.last_check_at ? formatDate(info.last_check_at) : (info.last_check_status === 'running' ? 'Running...' : '—');
+  var schedStatus = info.scheduler_active ? '<span class="si-dot si-dot-active"></span> Active' : '<span class="si-dot si-dot-idle"></span> Idle';
+  var groups = [
+    { label: 'System', rows: [
+      { icon: '&#x1F4CB;', key: 'Version', val: escHtml(info.version) },
+      { icon: '&#x23F1;', key: 'Uptime', val: formatUptime(info.uptime_seconds) },
+      { icon: '&#x1F4C5;', key: 'Started', val: info.app_started_at },
+      { icon: '&#x1F504;', key: 'API resp', val: info.api_response_time_ms + 'ms' },
+    ]},
+    { label: 'Scheduler', rows: [
+      { icon: '&#x23F3;', key: 'Status', val: schedStatus },
+      { icon: '&#x2705;', key: 'Last check', val: lastCheckStr },
+    ]},
   ];
-  tbody.innerHTML = rows.map(function (r) {
-    return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>';
+  el.innerHTML = groups.map(function (g) {
+    return '<div class="si-group"><div class="si-group-label">' + g.label + '</div>' +
+      g.rows.map(function (r) {
+        return '<div class="si-row"><span class="si-icon">' + r.icon + '</span><span class="si-key">' + r.key + '</span><span class="si-val">' + r.val + '</span></div>';
+      }).join('') + '</div>';
+  }).join('');
+}
+
+function renderWebappFailures(failures) {
+  var el = document.getElementById('webapp-failures-list');
+  if (!el) return;
+  if (!failures || failures.length === 0) {
+    el.innerHTML = '<div class="top-empty">No recent failures</div>';
+    return;
+  }
+  el.innerHTML = failures.map(function (w) {
+    var status = (w.status || 'unknown').toLowerCase();
+    var cls = status === 'down' ? 'expired' : 'warning';
+    return '<div class="top-item ' + cls + '" data-action="webapp-detail" data-id="' + w.id + '">' +
+      '<div class="top-left"><a class="top-url" href="' + escUrl(w.url) + '" target="_blank" rel="noopener">' + escHtml(w.name || w.url) + '</a><span class="top-tag ssl">' + status.toUpperCase() + '</span></div>' +
+      '<div class="top-right"><span class="top-days">' + (w.last_checked ? relativeTime(w.last_checked) : 'never') + '</span></div>' +
+      '</div>';
   }).join('');
 }
 
@@ -1173,9 +1339,48 @@ let _webappsCache = null;
 let _webappViewMode = 'cards';
 let _webappFilter = 'all';
 let _webappSort = { key: 'name', dir: 1 };
-let _webappPagination = { page: 0, size: 25 };
+let _webappPagination = { page: 1, size: 25 };
 let _selectedWebapps = new Set();
 let _webappGroupByStatus = false;
+let _webappCollapsedGroups = new Set();
+
+function saveWebappViewPrefs() {
+  var prefs = {
+    viewMode: _webappViewMode,
+    sort: _webappSort,
+    filter: _webappFilter,
+    groupBy: _webappGroupByStatus,
+    pageSize: _webappPagination.size,
+    cols: _webappVisibleCols,
+    collapsedGroups: [..._webappCollapsedGroups]
+  };
+  try { localStorage.setItem('vigil-prefs-webapp', JSON.stringify(prefs)); } catch (e) {}
+}
+
+function loadWebappViewPrefs() {
+  try {
+    var raw = localStorage.getItem('vigil-prefs-webapp');
+    if (!raw) return;
+    var p = JSON.parse(raw);
+    if (p.viewMode) _webappViewMode = p.viewMode;
+    if (p.sort) _webappSort = p.sort;
+    if (p.filter) _webappFilter = p.filter;
+    if (p.groupBy !== undefined) _webappGroupByStatus = !!p.groupBy;
+    if (p.pageSize) _webappPagination.size = p.pageSize;
+    if (p.cols) _webappVisibleCols = p.cols;
+    if (p.collapsedGroups) _webappCollapsedGroups = new Set(p.collapsedGroups);
+  } catch (e) {}
+}
+
+function renderWebappTagsHtml(a) {
+  if (!a.tags) return '';
+  var tags;
+  try { tags = typeof a.tags === 'string' ? JSON.parse(a.tags) : a.tags; } catch (e) { tags = []; }
+  if (!tags || !tags.length) return '';
+  return '<div class="card-tags">' + tags.slice(0, 3).map(function (t) {
+    return '<span class="tag-badge">' + escHtml(t) + '</span>';
+  }).join('') + (tags.length > 3 ? '<span class="tag-badge tag-more">+' + (tags.length - 3) + '</span>' : '') + '</div>';
+}
 
 function escUrl(u) {
   return escHtml(u.length > 60 ? u.slice(0, 57) + '...' : u);
@@ -1207,8 +1412,7 @@ function formatDurationCompact(h, m, d, hr) {
 
 var _detailWebappId = null;
 var _detailChartHours = 24;
-// Timezone offset in hours from UTC (default PKT Pakistan UTC+5)
-var _timezoneOffsetH = 5;
+var _timezoneOffsetH = -new Date().getTimezoneOffset() / 60;
 
 document.getElementById('chart-duration-bar') && document.getElementById('chart-duration-bar').addEventListener('click', function (e) {
   var btn = e.target.closest('[data-hours]');
@@ -1329,6 +1533,10 @@ function loadWebappChart() {
     }
 
     svg += '</g></svg>';
+    svg += '<div class="chart-legend" style="display:flex;gap:16px;justify-content:center;font-size:10px;color:' + muted + ';padding:4px 0">' +
+      '<span><span style="display:inline-block;width:12px;height:2px;background:' + color + ';vertical-align:middle;margin-right:4px"></span> Response time</span>' +
+      '<span><span style="display:inline-block;width:12px;height:8px;background:' + areaColor + ';vertical-align:middle;margin-right:4px;border:1px solid ' + color + '"></span> Value range</span>' +
+      '</div>';
     chartEl.innerHTML = svg;
 
     var svgEl = chartEl.querySelector('#chart-svg');
@@ -1363,7 +1571,8 @@ function loadWebappChart() {
           var hh12 = localPt.hour % 12 || 12;
           var ampm = localPt.hour < 12 ? 'AM' : 'PM';
           var mmS = localPt.min.toString().padStart(2, '0');
-          timeStr = monName + ' ' + localPt.day + ', ' + localPt.year + ', ' + hh12 + ':' + mmS + ' ' + ampm + ' PKT';
+          var tzLabel = 'UTC' + (_timezoneOffsetH >= 0 ? '+' : '') + _timezoneOffsetH;
+          timeStr = monName + ' ' + localPt.day + ', ' + localPt.year + ', ' + hh12 + ':' + mmS + ' ' + ampm + ' ' + tzLabel;
         }
         tooltip.innerHTML = '<div>' + timeStr + '</div><div style="font-weight:600;color:' + color + '">' + pt.response_time_ms + ' ms</div>';
         tooltip.style.display = '';
@@ -1416,6 +1625,11 @@ function openWebAppDetail(wa) {
       ? 'Up for ' + formatDurationLong(stats.current_duration_seconds)
       : (stats.current_duration_seconds != null ? 'Down for ' + formatDurationLong(stats.current_duration_seconds) : '');
 
+    var recentEl = document.getElementById('detail-wa-recent-checks');
+    if (recentEl && stats.recent_checks_total != null) {
+      recentEl.textContent = stats.recent_checks_up + '/' + stats.recent_checks_total + ' successful';
+    }
+
     function renderUptimeBar(period) {
       var pct = stats.uptime[period].uptime_pct;
       var incidents = stats.uptime[period].incidents;
@@ -1450,6 +1664,7 @@ function openWebAppDetail(wa) {
   });
 
   loadWebappChart();
+  loadWebappDetailSparkline(wa.id);
 
   modal.classList.add('open');
 }
@@ -1561,18 +1776,20 @@ function renderWebAppCardHtml(a) {
     '<strong class="card-url">' + escHtml(a.name || a.url) + '</strong>' +
     '<span class="card-time">' + escUrl(a.url) + '</span>' +
     '</div>' +
-    '<div class="card-meta"><span>Response: ' + rt + '</span><span>HTTP ' + code + '</span><span>Uptime: ' + uptimePct + '</span><span>Checked: ' + checked + '</span></div>' +
+    '<div class="card-meta"><span>Response: ' + rt + '</span><span>HTTP ' + code + '</span><span>Uptime: ' + uptimePct + '</span><span>Checked: ' + checked + '</span>' + (a.notes ? '<span class="card-notes" title="' + escHtml(a.notes) + '">&#x1F4DD; ' + escHtml(a.notes.length > 30 ? a.notes.slice(0, 27) + '...' : a.notes) + '</span>' : '') + '</div>' + renderWebappTagsHtml(a) +
     '<div class="webapp-sparkline" id="spark-wa-' + a.id + '" style="height:40px;margin-top:4px"></div>' +
     '</div>' +
     '<div class="card-actions">' +
     '<div class="actions-dropdown">' +
-    '<button class="btn btn-sm btn-secondary" data-action="toggle-actions-dropdown">Actions &#9662;</button>' +
-    '<div class="actions-dropdown-content">' +
-    '<button data-action="webapp-check-now" data-id="' + a.id + '">&#x21bb; Check Now</button>' +
-    '<button data-action="webapp-detail" data-id="' + a.id + '">&#x1F50D; View Details</button>' +
-    '<button data-action="webapp-toggle-active" data-id="' + a.id + '">' + (paused ? '&#x25B6; Resume' : '&#x23F8; Pause') + '</button>' +
-    '<button data-action="webapp-edit" data-id="' + a.id + '">&#x270E; Edit</button>' +
-    '<button data-action="webapp-delete" data-id="' + a.id + '">&#x1F5D1; Delete</button>' +
+    '<button class="btn btn-sm btn-secondary" data-action="toggle-actions-dropdown" aria-haspopup="true" aria-expanded="false" title="Actions">&#8943;</button>' +
+    '<div class="actions-dropdown-content" role="menu" tabindex="-1">' +
+    '<button role="menuitem" data-action="webapp-check-now" data-id="' + a.id + '"><span class="dropdown-item-icon">&#x21bb;</span><span class="dropdown-item-label">Check Now</span></button>' +
+    '<button role="menuitem" data-action="webapp-detail" data-id="' + a.id + '"><span class="dropdown-item-icon">&#x1F50D;</span><span class="dropdown-item-label">View Details</span></button>' +
+    '<hr class="actions-divider" role="separator">' +
+    '<button role="menuitem" data-action="webapp-toggle-active" data-id="' + a.id + '"><span class="dropdown-item-icon">' + (paused ? '&#x25B6;' : '&#x23F8;') + '</span><span class="dropdown-item-label">' + (paused ? 'Resume' : 'Pause') + '</span></button>' +
+    '<button role="menuitem" data-action="webapp-edit" data-id="' + a.id + '"><span class="dropdown-item-icon">&#x270E;</span><span class="dropdown-item-label">Edit</span></button>' +
+    '<hr class="actions-divider" role="separator">' +
+    '<button role="menuitem" class="dropdown-item-danger" data-action="webapp-delete" data-id="' + a.id + '"><span class="dropdown-item-icon">&#x1F5D1;</span><span class="dropdown-item-label">Delete</span></button>' +
     '</div></div></div></div>';
 }
 
@@ -1581,12 +1798,12 @@ function renderWebAppCards(apps) {
   document.getElementById('webapp-table').style.display = 'none';
   container.style.display = '';
   var pg = _webappPagination;
-  var start = pg.page * pg.size;
+  var start = (pg.page - 1) * pg.size;
   var page = apps.slice(start, start + pg.size);
 
   if (page.length === 0 && apps.length > 0) {
-    pg.page = Math.max(0, Math.ceil(apps.length / pg.size) - 1);
-    start = pg.page * pg.size;
+    pg.page = Math.max(1, Math.ceil(apps.length / pg.size));
+    start = (pg.page - 1) * pg.size;
     page = apps.slice(start, start + pg.size);
   }
 
@@ -1623,10 +1840,23 @@ function renderWebAppCards(apps) {
     container.innerHTML = page.map(function (a) { return renderWebAppCardHtml(a); }).join('');
   }
 
-  updateWebappBulkToolbar();
-  page.forEach(function (a) {
-    if (a.id && a.status) loadWebappSparkline(a.id);
+  // Apply collapsed groups state
+  _webappCollapsedGroups.forEach(function (key) {
+    var header = container.querySelector('[data-key="' + key + '"]');
+    if (header) {
+      header.classList.add('collapsed');
+      var body = header.nextElementSibling;
+      if (body) body.style.display = 'none';
+    }
   });
+
+  updateWebappBulkToolbar();
+  var loader = page.filter(function (a) { return a.id && a.status; });
+  var uncached = loader.filter(function (a) { return !_webappSparklineCache[a.id]; });
+  if (uncached.length > 1) {
+    batchLoadWebappSparklines(uncached.map(function (a) { return a.id; }));
+  }
+  loader.forEach(function (a) { loadWebappSparkline(a.id); });
 }
 
 function renderWebAppTable(apps) {
@@ -1634,12 +1864,12 @@ function renderWebAppTable(apps) {
   document.getElementById('webapp-table').style.display = '';
   var tbody = document.getElementById('webapp-table-body');
   var pg = _webappPagination;
-  var start = pg.page * pg.size;
+  var start = (pg.page - 1) * pg.size;
   var page = apps.slice(start, start + pg.size);
 
   if (page.length === 0 && apps.length > 0) {
-    pg.page = Math.max(0, Math.ceil(apps.length / pg.size) - 1);
-    start = pg.page * pg.size;
+    pg.page = Math.max(1, Math.ceil(apps.length / pg.size));
+    start = (pg.page - 1) * pg.size;
     page = apps.slice(start, start + pg.size);
   }
 
@@ -1655,7 +1885,7 @@ function renderWebAppTable(apps) {
     var paused = a.is_active === 0 || a.is_active === false;
     return '<tr' + sel + '>' +
       '<td class="col-checkbox"><input type="checkbox" class="webapp-select" value="' + a.id + '"' + (_selectedWebapps.has(a.id) ? ' checked' : '') + '></td>' +
-      '<td class="col-name">' + escHtml(a.name) + (paused ? ' <span class="text-muted">(paused)</span>' : '') + '</td>' +
+      '<td class="col-name">' + escHtml(a.name) + (paused ? ' <span class="text-muted">(paused)</span>' : '') + (a.notes ? '<br><span class="text-muted" style="font-size:10px">' + escHtml(a.notes.length > 40 ? a.notes.slice(0, 37) + '...' : a.notes) + '</span>' : '') + renderWebappTagsHtml(a) + '</td>' +
       '<td class="col-url" title="' + escHtml(a.url) + '">' + escUrl(a.url) + '</td>' +
       '<td class="col-status"><span class="domain-badge status-badge ' + cls + '">' + st.toUpperCase() + '</span></td>' +
       '<td class="col-response">' + rt + '</td>' +
@@ -1665,27 +1895,40 @@ function renderWebAppTable(apps) {
       '<td class="col-checked">' + checked + '</td>' +
       '<td class="col-actions">' +
       '<div class="actions-dropdown">' +
-      '<button class="btn btn-sm btn-secondary" data-action="toggle-actions-dropdown">Actions &#9662;</button>' +
-      '<div class="actions-dropdown-content">' +
-      '<button data-action="webapp-check-now" data-id="' + a.id + '">&#x21bb; Check Now</button>' +
-      '<button data-action="webapp-detail" data-id="' + a.id + '">&#x1F50D; View Details</button>' +
-      '<button data-action="webapp-toggle-active" data-id="' + a.id + '">' + (paused ? '&#x25B6; Resume' : '&#x23F8; Pause') + '</button>' +
-      '<button data-action="webapp-edit" data-id="' + a.id + '">&#x270E; Edit</button>' +
-      '<button data-action="webapp-delete" data-id="' + a.id + '">&#x1F5D1; Delete</button>' +
+      '<button class="btn btn-sm btn-secondary" data-action="toggle-actions-dropdown" aria-haspopup="true" aria-expanded="false" title="Actions">&#8943;</button>' +
+      '<div class="actions-dropdown-content" role="menu" tabindex="-1">' +
+      '<button role="menuitem" data-action="webapp-check-now" data-id="' + a.id + '"><span class="dropdown-item-icon">&#x21bb;</span><span class="dropdown-item-label">Check Now</span></button>' +
+      '<button role="menuitem" data-action="webapp-detail" data-id="' + a.id + '"><span class="dropdown-item-icon">&#x1F50D;</span><span class="dropdown-item-label">View Details</span></button>' +
+      '<hr class="actions-divider" role="separator">' +
+      '<button role="menuitem" data-action="webapp-toggle-active" data-id="' + a.id + '"><span class="dropdown-item-icon">' + (paused ? '&#x25B6;' : '&#x23F8;') + '</span><span class="dropdown-item-label">' + (paused ? 'Resume' : 'Pause') + '</span></button>' +
+      '<button role="menuitem" data-action="webapp-edit" data-id="' + a.id + '"><span class="dropdown-item-icon">&#x270E;</span><span class="dropdown-item-label">Edit</span></button>' +
+      '<hr class="actions-divider" role="separator">' +
+      '<button role="menuitem" class="dropdown-item-danger" data-action="webapp-delete" data-id="' + a.id + '"><span class="dropdown-item-icon">&#x1F5D1;</span><span class="dropdown-item-label">Delete</span></button>' +
       '</div></div></td></tr>';
   }).join('') || '<tr><td colspan="10" class="empty-state"><p>No web apps match your filters.</p></td></tr>';
   updateWebappBulkToolbar();
-  page.forEach(function (a) {
-    if (a.id && a.status) loadWebappSparkline(a.id);
+  // Apply persisted column visibility
+  Object.keys(_webappVisibleCols).forEach(function (col) {
+    if (_webappVisibleCols[col] === false) {
+      document.querySelectorAll('#webapp-table .' + col).forEach(function (el) {
+        el.style.display = 'none';
+      });
+    }
   });
+  var loader = page.filter(function (a) { return a.id && a.status; });
+  var uncached = loader.filter(function (a) { return !_webappSparklineCache[a.id]; });
+  if (uncached.length > 1) {
+    batchLoadWebappSparklines(uncached.map(function (a) { return a.id; }));
+  }
+  loader.forEach(function (a) { loadWebappSparkline(a.id); });
 }
 
 function renderWebAppPagination(apps) {
   var pg = _webappPagination;
   var total = apps.length;
   var pages = Math.ceil(total / pg.size) || 1;
-  if (pg.page >= pages) pg.page = pages - 1;
-  var start = pg.page * pg.size;
+  if (pg.page > pages) pg.page = pages;
+  var start = (pg.page - 1) * pg.size;
   var end = Math.min(start + pg.size, total);
   var wrapper = document.getElementById('pagination-webapp');
   if (total <= pg.size) { wrapper.style.display = 'none'; return; }
@@ -1693,10 +1936,10 @@ function renderWebAppPagination(apps) {
   document.getElementById('page-from-webapp').textContent = total ? start + 1 : 0;
   document.getElementById('page-to-webapp').textContent = end;
   document.getElementById('page-total-webapp').textContent = total;
-  document.getElementById('page-first-webapp').disabled = pg.page === 0;
-  document.getElementById('page-prev-webapp').disabled = pg.page === 0;
-  document.getElementById('page-next-webapp').disabled = pg.page >= pages - 1;
-  document.getElementById('page-last-webapp').disabled = pg.page >= pages - 1;
+  document.getElementById('page-first-webapp').disabled = pg.page <= 1;
+  document.getElementById('page-prev-webapp').disabled = pg.page <= 1;
+  document.getElementById('page-next-webapp').disabled = pg.page >= pages;
+  document.getElementById('page-last-webapp').disabled = pg.page >= pages;
 }
 
 function updateWebappBulkToolbar() {
@@ -1731,6 +1974,11 @@ function openWebAppModal(app) {
   document.getElementById('webapp-headers').value = app && app.headers ? (typeof app.headers === 'string' ? app.headers : JSON.stringify(app.headers, null, 2)) : '';
   document.getElementById('webapp-body').value = app ? (app.body || '') : '';
   document.getElementById('webapp-notes').value = app ? (app.notes || '') : '';
+  var tagsVal = '';
+  if (app && app.tags) {
+    try { tagsVal = JSON.parse(app.tags).join(', '); } catch (e) { tagsVal = app.tags; }
+  }
+  document.getElementById('webapp-tags').value = tagsVal;
   document.getElementById('webapp-notify-down').checked = app ? (app.notify_on_down ? true : false) : true;
   document.getElementById('webapp-notify-recovery').checked = app ? (app.notify_on_recovery ? true : false) : true;
   modal.classList.add('open');
@@ -1753,8 +2001,16 @@ function renderSchedulerStatus(sched, lastCheck) {
   const el = document.getElementById('scheduler-text');
   const dot = document.getElementById('scheduler-dot');
   let text = '';
-  if (sched && sched.next_run) {
-    text = 'Next check: every 24h';
+  if (sched && (sched.next_run || sched.webapp_interval_seconds)) {
+    const parts = [];
+    if (sched.domain_interval_hours) {
+      parts.push(`domains: every ${sched.domain_interval_hours}h`);
+    }
+    if (sched.webapp_interval_seconds) {
+      const min = Math.round(sched.webapp_interval_seconds / 60);
+      parts.push(`webapps: every ${min}m`);
+    }
+    text = 'Next check: ' + parts.join(' · ');
   } else {
     text = 'Scheduler active — not yet scheduled';
   }
@@ -1793,202 +2049,6 @@ function renderSchedulerStatus(sched, lastCheck) {
   }
 }
 
-function renderSparkline(snapshots) {
-  var canvas = document.getElementById('sparkline-canvas');
-  if (!canvas) return;
-  var ctx = canvas.getContext('2d');
-  var dpr = window.devicePixelRatio || 1;
-  var w = canvas.offsetWidth;
-  var h = 140;
-  canvas.width = w * dpr;
-  canvas.height = h * dpr;
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
-  var tipEl = document.getElementById('sparkline-tooltip');
-  var legendEl = document.getElementById('sparkline-legend');
-
-  if (!snapshots || snapshots.length < 2) {
-    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--text-muted');
-    ctx.font = '13px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Need at least 2 days of data', w / 2, h / 2);
-    if (legendEl) legendEl.innerHTML = '';
-    if (tipEl) tipEl.style.display = 'none';
-    return;
-  }
-
-  var data = snapshots;
-  var pad = { top: 14, bottom: 22, left: 36, right: 12 };
-  var chartW = w - pad.left - pad.right;
-  var chartH = h - pad.top - pad.bottom;
-
-  var domainPcts = data.map(function (s) { return s.domain_total > 0 ? s.domain_healthy / s.domain_total : 0; });
-  var sslPcts = data.map(function (s) { return s.ssl_total > 0 ? s.ssl_healthy / s.ssl_total : 0; });
-  var allPcts = domainPcts.concat(sslPcts);
-  var minPct = Math.min(0, Math.min.apply(null, allPcts));
-  var maxPct = Math.max.apply(null, allPcts);
-  var pctRange = maxPct - minPct || 1;
-
-  function toY(pct) { return pad.top + chartH - ((pct - minPct) / pctRange) * chartH; }
-
-  // Y-axis labels
-  ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--text-muted');
-  ctx.font = '9px sans-serif';
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'middle';
-  [0, 0.25, 0.5, 0.75, 1].forEach(function (frac) {
-    var pctVal = Math.round((minPct + pctRange * frac) * 100);
-    var y = toY(minPct + pctRange * frac);
-    ctx.fillText(pctVal + '%', pad.left - 4, y);
-  });
-  ctx.textBaseline = 'alphabetic';
-
-  // Grid lines (subtle)
-  ctx.strokeStyle = 'rgba(128,128,128,0.06)';
-  ctx.lineWidth = 1;
-  [0, 0.25, 0.5, 0.75, 1].forEach(function (frac) {
-    var y = toY(minPct + pctRange * frac);
-    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
-  });
-
-  // Date labels on x-axis
-  ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--text-muted');
-  ctx.font = '9px sans-serif';
-  ctx.textAlign = 'center';
-  [0, Math.floor((data.length - 1) / 2), data.length - 1].forEach(function (i) {
-    var x = pad.left + (i / (data.length - 1)) * chartW;
-    var d = new Date(data[i].date || data[i].snapshot_date);
-    ctx.fillText(d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), x, h - 4);
-  });
-
-  var primaryColor = getComputedStyle(document.body).getPropertyValue('--primary').trim() || '#3b82f6';
-  var greenColor = getComputedStyle(document.body).getPropertyValue('--green').trim() || '#22c55e';
-
-  // Smooth bezier helper
-  function smoothPoints(pcts) {
-    var pts = pcts.map(function (p, i) { return { x: pad.left + (i / (pcts.length - 1)) * chartW, y: toY(p) }; });
-    if (pts.length < 2) return pts;
-    // Add control points for smooth bezier
-    var result = [];
-    for (var i = 0; i < pts.length - 1; i++) {
-      var p0 = pts[i === 0 ? 0 : i - 1];
-      var p1 = pts[i];
-      var p2 = pts[i + 1];
-      var p3 = pts[i + 2 >= pts.length ? pts.length - 1 : i + 2];
-      var cp1x = p1.x + (p2.x - p0.x) / 6;
-      var cp1y = p1.y + (p2.y - p0.y) / 6;
-      var cp2x = p2.x - (p3.x - p1.x) / 6;
-      var cp2y = p2.y - (p3.y - p1.y) / 6;
-      result.push({ p1: p1, p2: p2, cp1: { x: cp1x, y: cp1y }, cp2: { x: cp2x, y: cp2y } });
-    }
-    return result;
-  }
-
-  function drawSeries(pcts, color, bgColor, glowColor) {
-    var segments = smoothPoints(pcts);
-    if (segments.length === 0) return;
-    var first = segments[0].p1;
-    var last = segments[segments.length - 1].p2;
-
-    // Glow behind line
-    if (glowColor) {
-      ctx.save();
-      ctx.shadowColor = glowColor;
-      ctx.shadowBlur = 8;
-      ctx.beginPath();
-      ctx.moveTo(first.x, first.y);
-      segments.forEach(function (s) { ctx.bezierCurveTo(s.cp1.x, s.cp1.y, s.cp2.x, s.cp2.y, s.p2.x, s.p2.y); });
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      ctx.globalAlpha = 0.4;
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // Gradient fill under curve
-    var grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + chartH);
-    grad.addColorStop(0, bgColor);
-    grad.addColorStop(1, 'transparent');
-    ctx.beginPath();
-    ctx.moveTo(first.x, pad.top + chartH);
-    ctx.lineTo(first.x, first.y);
-    segments.forEach(function (s) { ctx.bezierCurveTo(s.cp1.x, s.cp1.y, s.cp2.x, s.cp2.y, s.p2.x, s.p2.y); });
-    ctx.lineTo(last.x, pad.top + chartH);
-    ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.fill();
-
-    // Main line
-    ctx.beginPath();
-    ctx.moveTo(first.x, first.y);
-    segments.forEach(function (s) { ctx.bezierCurveTo(s.cp1.x, s.cp1.y, s.cp2.x, s.cp2.y, s.p2.x, s.p2.y); });
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Dots — end dot larger with glow
-    var allPts = [first].concat(segments.map(function (s) { return s.p2; }));
-    allPts.forEach(function (p, i) {
-      var r = (i === allPts.length - 1) ? 4 : 2.5;
-      // Outer glow on end dot
-      if (i === allPts.length - 1) {
-        ctx.beginPath(); ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
-        ctx.fillStyle = color; ctx.globalAlpha = 0.15; ctx.fill(); ctx.globalAlpha = 1;
-      }
-      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue('--bg-card');
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    });
-
-    return allPts;
-  }
-
-  drawSeries(domainPcts, greenColor, 'rgba(34,197,94,0.08)', 'rgba(34,197,94,0.15)');
-  drawSeries(sslPcts, primaryColor, 'rgba(59,130,246,0.08)', 'rgba(59,130,246,0.15)');
-
-  // Legend with latest values
-  if (legendEl) {
-    var latestDomain = Math.round(domainPcts[domainPcts.length - 1] * 100);
-    var latestSsl = Math.round(sslPcts[sslPcts.length - 1] * 100);
-    legendEl.innerHTML =
-      '<span class="legend-item"><span class="legend-dot" style="background:' + greenColor + '"></span>Domain <span class="legend-value">' + latestDomain + '%</span></span>' +
-      '<span class="legend-item"><span class="legend-dot" style="background:' + primaryColor + '"></span>SSL <span class="legend-value">' + latestSsl + '%</span></span>';
-  }
-
-  // Hover tooltip
-  var tooltipData = [];
-  for (var i = 0; i < data.length; i++) {
-    var x = pad.left + (i / (data.length - 1)) * chartW;
-    var d = new Date(data[i].date || data[i].snapshot_date);
-    tooltipData.push({ x: x, domainPct: Math.round(domainPcts[i] * 100), sslPct: Math.round(sslPcts[i] * 100), label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) });
-  }
-
-  function onMove(mx) {
-    if (!tipEl) return;
-    var rect = canvas.getBoundingClientRect();
-    var relX = mx - rect.left;
-    var closest = tooltipData[0];
-    var minDist = Infinity;
-    tooltipData.forEach(function (t) {
-      var d = Math.abs(t.x - relX);
-      if (d < minDist) { minDist = d; closest = t; }
-    });
-    tipEl.style.display = 'block';
-    tipEl.style.left = closest.x + 'px';
-    tipEl.style.top = pad.top + 'px';
-    tipEl.innerHTML =
-      '<div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">' + closest.label + '</div>' +
-      '<div class="tt-row"><span class="tt-dot" style="background:' + greenColor + '"></span><span class="tt-label">Domain</span><span class="tt-value">' + closest.domainPct + '%</span></div>' +
-      '<div class="tt-row"><span class="tt-dot" style="background:' + primaryColor + '"></span><span class="tt-label">SSL</span><span class="tt-value">' + closest.sslPct + '%</span></div>';
-  }
-
-  canvas.onmousemove = function (e) { onMove(e.clientX); };
-  canvas.onmouseleave = function () { if (tipEl) tipEl.style.display = 'none'; };
-}
-
 function renderExpiringList(containerId, list) {
   const el = document.getElementById(containerId);
   if (!el) return;
@@ -2002,9 +2062,9 @@ function renderExpiringList(containerId, list) {
     var severityPct = maxDays > 0 ? Math.min(100, Math.round((1 - d.days / maxDays) * 100)) : 0;
     var sevClass = d.days <= half * 0.34 ? 'danger' : d.days <= half ? 'warning' : 'caution';
     return `<div class="top-item ${cls}" data-action="go-domain" data-id="${d.id}">
-      <div class="severity-bar ${sevClass}" style="width:${severityPct}%"></div>
       <div class="top-left"><a class="top-url" href="https://${escHtml(d.url)}" target="_blank" rel="noopener">${escHtml(d.url)}</a></div>
       <div class="top-right"><span class="top-days">${d.days}d</span>${checkBtn}</div>
+      <div class="expiry-progress"><div class="expiry-progress-fill ${sevClass}" style="width:${severityPct}%"></div></div>
     </div>`;
   }).join('');
 }
@@ -2351,10 +2411,19 @@ document.addEventListener('click', (e) => {
   const header = e.target.closest('[data-action="toggle-group"]');
   if (header) {
     const key = header.dataset.key;
-    _collapsedGroups[key] = !_collapsedGroups[key];
     const body = header.nextElementSibling;
-    header.classList.toggle('collapsed');
-    body.classList.toggle('collapsed');
+    if (key && key.startsWith('wa-')) {
+      var st = key.replace('wa-', '');
+      if (_webappCollapsedGroups.has(st)) _webappCollapsedGroups.delete(st);
+      else _webappCollapsedGroups.add(st);
+      header.classList.toggle('collapsed');
+      if (body) body.style.display = header.classList.contains('collapsed') ? 'none' : '';
+      saveWebappViewPrefs();
+    } else {
+      _collapsedGroups[key] = !_collapsedGroups[key];
+      header.classList.toggle('collapsed');
+      if (body) body.classList.toggle('collapsed');
+    }
   }
 });
 
@@ -3042,7 +3111,6 @@ function loadSettingsTabData() {
   const activeTab = document.querySelector('.settings-tab.active')?.dataset.stab;
   if (activeTab === 'users') loadUsers();
   if (activeTab === 'apikeys') loadApiKeys();
-  if (activeTab === 'backups') loadBackups();
   if (activeTab === 'emailtpl') loadEmailTemplates();
 }
 
@@ -3533,40 +3601,6 @@ document.addEventListener('click', (e) => {
 });
 
 // ─── Backups ──────────────────────────────────────────────────
-function loadBackups(force) {
-  const container = document.getElementById('backups-list');
-  if (container && force) container.innerHTML = '<div class="settings-list-state">Loading backups...</div>';
-  api('GET', '/api/backups').then(backups => {
-    if (!container) return;
-    if (backups.length === 0) { container.innerHTML = '<div class="settings-list-state">No backups yet.</div>'; return; }
-    container.innerHTML = backups.map(b => {
-      var meta = '';
-      if (b.domain_count !== undefined && b.domain_count !== null) {
-        meta += '<span style="margin-right:8px">' + b.domain_count + ' domains</span>';
-      }
-      if (b.db_size) {
-        var pct = ((1 - b.size / b.db_size) * 100).toFixed(0);
-        meta += '<span style="color:var(--green)">' + formatSize(b.size) + ' (' + pct + '% smaller)</span>';
-      } else {
-        meta += formatSize(b.size);
-      }
-      return '<div class="backup-card">' +
-        '<div class="backup-info">' +
-          '<div class="backup-name">' + escHtml(b.filename) + '</div>' +
-          '<div class="backup-meta">' + meta + ' · Created: ' + formatDate(b.created) + '</div>' +
-        '</div>' +
-        '<div class="backup-actions">' +
-          '<button class="btn btn-sm btn-secondary" data-action="download-backup" data-file="' + escHtml(b.filename) + '">Download</button>' +
-          '<button class="btn btn-sm btn-secondary" data-action="restore-backup" data-file="' + escHtml(b.filename) + '">Restore</button>' +
-          '<button class="btn btn-sm btn-danger" data-action="delete-backup" data-file="' + escHtml(b.filename) + '">Delete</button>' +
-        '</div>' +
-      '</div>';
-    }).join('');
-  }).catch(e => {
-    if (container) container.innerHTML = '<div class="settings-list-state error">Failed to load backups: ' + escHtml(e.message) + '</div>';
-  });
-}
-
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -3574,27 +3608,26 @@ function formatSize(bytes) {
 }
 
 document.addEventListener('click', (e) => {
-  if (e.target.dataset.action === 'create-backup') {
-    api('POST', '/api/backups').then(() => {
-      toast('Backup created');
-      loadBackups(true);
-    }).catch(e => toast(e.message, 'error'));
-  }
   if (e.target.dataset.action === 'download-backup') {
     window.open(`/api/backups/download/${e.target.dataset.file}`, '_blank');
   }
   if (e.target.dataset.action === 'restore-backup') {
     if (!confirm(`Restore database from ${e.target.dataset.file}? This will replace the current database.`)) return;
+    var restoreBtn = e.target;
+    setLoading(restoreBtn, true);
     api('POST', '/api/backups/restore', { filename: e.target.dataset.file }).then(() => {
       toast('Database restored. Reloading...');
       setTimeout(() => window.location.reload(), 1500);
-    }).catch(e => toast(e.message, 'error'));
+    }).catch(e => {
+      toast(e.message, 'error');
+      setLoading(restoreBtn, false);
+    });
   }
   if (e.target.dataset.action === 'delete-backup') {
     if (!confirm(`Delete backup ${e.target.dataset.file}?`)) return;
     api('DELETE', `/api/backups/${e.target.dataset.file}`).then(() => {
       toast('Backup deleted');
-      loadBackups(true);
+      loadBackupsViewList();
     }).catch(e => toast(e.message, 'error'));
   }
 });
@@ -3621,6 +3654,11 @@ function loadBackupDbInfo() {
     } else {
       connInfo = '<span class="backup-meta-item">Size: ' + sizeStr + '</span>';
     }
+    var nextBackupHtml = '';
+    if (info.next_backup_at) {
+      var nb = relativeTime(info.next_backup_at);
+      nextBackupHtml = '<span class="backup-meta-item">Next backup: <strong>' + nb + '</strong></span>';
+    }
     container.innerHTML =
       '<div class="backup-db-card">' +
         '<div class="backup-db-header">' +
@@ -3630,9 +3668,11 @@ function loadBackupDbInfo() {
         '<div class="backup-db-body">' +
           '<div class="backup-meta-row">' +
             '<span class="backup-meta-item">Domains: <strong>' + (info.domain_count !== null && info.domain_count !== undefined ? info.domain_count : 'N/A') + '</strong></span>' +
+            '<span class="backup-meta-item">Web Apps: <strong>' + (info.webapp_count !== null && info.webapp_count !== undefined ? info.webapp_count : 'N/A') + '</strong></span>' +
             '<span class="backup-meta-item">Backups: <strong>' + info.backup_count + '</strong></span>' +
             '<span class="backup-meta-item">Max Retention: <strong>' + info.max_backups + '</strong></span>' +
             connInfo +
+            nextBackupHtml +
           '</div>' +
         '</div>' +
       '</div>';
@@ -3657,16 +3697,15 @@ function loadBackupsViewList() {
     container.innerHTML = backups.map(b => {
       var meta = '';
       var formatBadge = '';
-      var fmt = b.filename ? b.filename.split('.').slice(-2, -1)[0] || '' : '';
       if (b.filename && b.filename.endsWith('.sql.gz')) formatBadge = '<span class="badge badge-pg">pg_dump</span>';
       else if (b.filename && b.filename.endsWith('.json.gz')) formatBadge = '<span class="badge badge-json">JSON</span>';
       else formatBadge = '<span class="badge badge-sqlite">SQLite</span>';
       if (b.domain_count !== undefined && b.domain_count !== null) {
-        meta += '<span class="backup-meta-item">' + b.domain_count + ' domains</span>';
+        meta += '<span class="backup-meta-item">' + b.domain_count + ' domains</span> ';
       }
       meta += '<span class="backup-meta-item">' + formatSize(b.size) + '</span>';
       if (b.notes) {
-        meta += '<span class="backup-meta-item backup-notes">Notes: ' + escHtml(b.notes) + '</span>';
+        meta += ' <span class="backup-meta-item backup-notes">Notes: ' + escHtml(b.notes) + '</span>';
       }
       return '<div class="backup-card">' +
         '<div class="backup-info">' +
@@ -3687,18 +3726,24 @@ function loadBackupsViewList() {
 
 function createBackupWithNotes() {
   var notes = document.getElementById('backup-notes-input').value.trim();
+  var btn = document.querySelector('[data-action="confirm-create-backup"]');
+  setLoading(btn, true);
   api('POST', '/api/backups', notes ? { notes: notes } : undefined).then(() => {
     toast('Backup created');
     document.getElementById('backup-create-pane').style.display = 'none';
     loadBackupsViewList();
     loadBackupDbInfo();
-  }).catch(e => toast(e.message, 'error'));
+  }).catch(e => toast(e.message, 'error')).finally(function () {
+    setLoading(btn, false);
+  });
 }
 
 function uploadAndRestoreBackup() {
   var input = document.getElementById('backup-upload-input');
   if (!input.files || !input.files[0]) { toast('Please select a backup file', 'error'); return; }
   if (!confirm('Restore database from uploaded file "' + input.files[0].name + '"? This will replace the current database. A pre-restore snapshot will be created.')) return;
+  var btn = document.querySelector('[data-action="confirm-upload-backup"]');
+  setLoading(btn, true);
   var formData = new FormData();
   formData.append('file', input.files[0]);
   fetch('/api/backups/upload', {
@@ -3713,7 +3758,10 @@ function uploadAndRestoreBackup() {
   }).then(() => {
     toast('Database restored from uploaded backup. Reloading...');
     setTimeout(() => window.location.reload(), 1500);
-  }).catch(e => toast(e.message, 'error'));
+  }).catch(e => {
+    toast(e.message, 'error');
+    setLoading(btn, false);
+  });
 }
 
 function saveBackupSchedule() {
@@ -3724,11 +3772,15 @@ function saveBackupSchedule() {
   if (isNaN(minute) || minute < 0 || minute > 59) { toast('Invalid minute (0-59)', 'error'); return; }
   if (isNaN(maxBackups) || maxBackups < 1 || maxBackups > 365) { toast('Max backups must be 1-365', 'error'); return; }
 
-  api('PUT', '/api/settings', { backup_schedule_hour: hour, backup_schedule_minute: minute, max_backups: maxBackups }).then(() => {
-    toast('Backup schedule saved. Restart required for schedule change to take effect.');
+  var btn = document.querySelector('[data-action="save-backup-schedule"]');
+  setLoading(btn, true);
+  api('POST', '/api/backups/schedule', { hour: hour, minute: minute, max_backups: maxBackups }).then(r => {
+    toast('Backup schedule updated');
     document.getElementById('backup-schedule-card').style.display = 'none';
     loadBackupDbInfo();
-  }).catch(e => toast(e.message, 'error'));
+  }).catch(e => toast(e.message, 'error')).finally(function () {
+    setLoading(btn, false);
+  });
 }
 
 // API key checkbox → bulk revoke button
@@ -4362,6 +4414,16 @@ function loadWebappSparkline(id) {
   }).catch(function () {});
 }
 
+function batchLoadWebappSparklines(ids) {
+  api('POST', '/api/webapps/batch-sparklines', { ids: ids }).then(function (data) {
+    Object.keys(data).forEach(function (key) {
+      var id = parseInt(key);
+      _webappSparklineCache[id] = data[key];
+      renderWebappSparkline(id, data[key]);
+    });
+  }).catch(function () {});
+}
+
 function renderWebappSparkline(id, data) {
   var el = document.getElementById('spark-wa-' + id);
   if (!el) return;
@@ -4381,6 +4443,28 @@ function renderWebappSparkline(id, data) {
   el.innerHTML = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" style="display:block">' +
     '<polyline fill="none" stroke="' + color + '" stroke-width="1.5" points="' + points + '"/>' +
     '</svg>';
+}
+
+function loadWebappDetailSparkline(id) {
+  api('GET', '/api/webapps/' + id + '/results?days=7').then(function (data) {
+    var el = document.getElementById('detail-wa-sparkline');
+    if (!el) return;
+    var rts = data.filter(function (d) { return d.response_time_ms != null; }).map(function (d) { return d.response_time_ms; });
+    if (rts.length < 2) { el.innerHTML = ''; return; }
+    var w = el.offsetWidth || 120;
+    var h = 24;
+    var max = Math.max.apply(null, rts);
+    var min = Math.min.apply(null, rts);
+    var range = max - min || 1;
+    var points = rts.map(function (v, i) {
+      var x = (i / (rts.length - 1)) * w;
+      var y = h - ((v - min) / range) * (h - 2) - 1;
+      return x + ',' + y;
+    }).join(' ');
+    var color = getComputedStyle(document.body).getPropertyValue('--text-muted').trim() || '#888';
+    var primary = getComputedStyle(document.body).getPropertyValue('--primary').trim() || '#3b82f6';
+    el.innerHTML = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" style="display:block"><polygon fill="' + primary + '22" points="0,' + h + ' ' + points + ' ' + w + ',' + h + '"/><polyline fill="none" stroke="' + primary + '" stroke-width="1.5" points="' + points + '"/></svg>';
+  }).catch(function () {});
 }
 
 function renderLogSummary(summary) {
@@ -4912,8 +4996,22 @@ function _renderSparklineSvg(container, data) {
 
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.actions-dropdown')) {
+    document.querySelectorAll('.actions-dropdown-content').forEach(function (d) { d.style.display = 'none'; });
     document.querySelectorAll('.actions-dropdown.open').forEach(function (d) { d.classList.remove('open'); });
+    document.querySelectorAll('[data-action="toggle-actions-dropdown"]').forEach(function (b) { b.setAttribute('aria-expanded', 'false'); });
   }
+});
+
+// ─── Expiry tabs ────────────────────────────────────────────────
+document.addEventListener('click', function (e) {
+  var tab = e.target.closest('.expiry-tab');
+  if (!tab) return;
+  e.preventDefault();
+  document.querySelectorAll('.expiry-tab').forEach(function (t) { t.classList.remove('active'); });
+  tab.classList.add('active');
+  var list = tab.getAttribute('data-tab');
+  document.getElementById('ssl-expiring-list').style.display = list === 'ssl' ? '' : 'none';
+  document.getElementById('domain-expiring-list').style.display = list === 'domain' ? '' : 'none';
 });
 
 // ─── Init ──────────────────────────────────────────────────────

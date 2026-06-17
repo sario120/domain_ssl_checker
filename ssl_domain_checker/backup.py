@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 _ALLOWED_BACKUP_TABLES = frozenset({
     'domains', 'users', 'settings', 'logs', 'check_results',
     'check_runs', 'check_result_history', 'rate_limits',
+    'webapps', 'webapp_results', 'webapp_health_log',
+    'health_snapshots', 'security_settings', 'api_keys', 'schema_version',
 })
 _ALLOWED_BACKUP_COLUMNS = frozenset({
     'id', 'url', 'type', 'notes', 'manual_expiry_date', 'manual_registrar',
@@ -31,6 +33,17 @@ _ALLOWED_BACKUP_COLUMNS = frozenset({
     'email_templates', 'last_summary_sent', 'check_type', 'status', 'message',
     'domain_id', 'client_ip', 'started_at', 'completed_at', 'error',
     'ssl_alert_sent', 'domain_alert_sent', 'key', 'count', 'window_start',
+    'name', 'is_active', 'notify_on_down', 'notify_on_recovery',
+    'response_time_threshold', 'uptime_check_interval', 'status_changed_at',
+    'webapp_id', 'response_time_ms', 'status_code', 'error_message', 'checked_at',
+    'date', 'uptime_percent', 'total_checks', 'up_checks', 'slow_checks', 'down_checks',
+    'avg_response_time_ms', 'webapp_count',
+    'snapshot_date', 'ssl_healthy', 'ssl_total', 'domain_healthy', 'domain_total',
+    'session_timeout', 'max_login_attempts', 'lockout_duration',
+    'min_password_length', 'require_uppercase', 'require_lowercase',
+    'require_number', 'require_special',
+    'key_hash', 'key_masked', 'revoked', 'last_used',
+    'version',
 })
 
 BACKUP_DIR = os.environ.get(
@@ -190,12 +203,21 @@ def get_db_info():
         'type': db.DB_TYPE,
         'size': None,
         'domain_count': None,
+        'webapp_count': None,
         'backup_count': len(list_backups()),
         'max_backups': MAX_BACKUPS,
         'backup_dir': BACKUP_DIR,
         'schedule_hour': 3,
         'schedule_minute': 0,
+        'next_backup_at': None,
     }
+    try:
+        from scheduler import scheduler as _sched
+        job = _sched.get_job('db_backup')
+        if job and job.next_run_time:
+            info['next_backup_at'] = job.next_run_time.isoformat()
+    except Exception:
+        pass
     try:
         conn = db.connect()
         row = conn.execute("SELECT backup_schedule_hour, backup_schedule_minute, max_backups FROM settings WHERE id=1").fetchone()
@@ -215,6 +237,8 @@ def get_db_info():
                 info['size'] = os.path.getsize(DB_PATH)
         row2 = conn.execute("SELECT COUNT(*) AS cnt FROM domains").fetchone()
         info['domain_count'] = row2['cnt'] if row2 else None
+        row3 = conn.execute("SELECT COUNT(*) AS cnt FROM webapps").fetchone()
+        info['webapp_count'] = row3['cnt'] if row3 else None
         conn.close()
     except Exception:
         try:
@@ -498,13 +522,29 @@ def upload_and_restore(file_storage):
 
 
 def schedule_backup(scheduler):
+    hour = 3
+    minute = 0
+    try:
+        conn = db.connect()
+        row = conn.execute("SELECT backup_schedule_hour, backup_schedule_minute, max_backups FROM settings WHERE id=1").fetchone()
+        if row:
+            if row.get('backup_schedule_hour') is not None:
+                hour = int(row['backup_schedule_hour'])
+            if row.get('backup_schedule_minute') is not None:
+                minute = int(row['backup_schedule_minute'])
+            if row.get('max_backups') is not None:
+                global MAX_BACKUPS
+                MAX_BACKUPS = int(row['max_backups'])
+        conn.close()
+    except Exception:
+        pass
     scheduler.add_job(
         create_backup,
         "cron",
-        hour=3,
-        minute=0,
+        hour=hour,
+        minute=minute,
         id="db_backup",
         name="Database backup",
         replace_existing=True,
     )
-    logger.info("Daily DB backup scheduled for 03:00")
+    logger.info("Daily DB backup scheduled for %02d:%02d UTC", hour, minute)

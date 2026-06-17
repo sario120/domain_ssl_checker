@@ -72,3 +72,12 @@ vigil-backups/
 # pytest
 .pytest_cache/
 *test_output*/
+
+# PID files
+*.pid
+
+# Temporary files
+tmp/
+
+# pyenv
+.python-version

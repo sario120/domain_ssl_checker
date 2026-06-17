@@ -77,6 +77,11 @@ def start_scheduler(check_all_callback, check_webapps_callback=None):
 
 def get_next_scheduled_check():
     job = scheduler.get_job('check_all_domains')
+    webapp_job = scheduler.get_job('check_webapps')
+    result = {}
     if job and job.next_run_time:
-        return job.next_run_time.isoformat()
-    return None
+        result['next_run'] = job.next_run_time.isoformat()
+        result['domain_interval_hours'] = int(os.environ.get('SCHEDULER_INTERVAL_HOURS', '24'))
+    if webapp_job:
+        result['webapp_interval_seconds'] = 60  # runs every 1 minute
+    return result if result else None

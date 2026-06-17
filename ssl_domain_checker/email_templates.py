@@ -3,6 +3,19 @@ import json
 import re
 
 DEFAULT_TEMPLATES = {
+    "webapp_alert": {
+        "subject": "[Vigil] Web App Status Changed — {domain}",
+        "body_html": """<div style="font-family:sans-serif;max-width:600px;margin:auto;background:#fff">
+<h2 style="color:#3b82f6">Web App Status Alert</h2>
+<p><strong>{domain}</strong> status changed to <strong>{status}</strong>.</p>
+<table style="border-collapse:collapse;width:100%;margin:16px 0">
+<tr><td style="padding:8px;border:1px solid #e2e8f0;font-weight:600;width:40%">Name</td><td style="padding:8px;border:1px solid #e2e8f0">{domain}</td></tr>
+<tr><td style="padding:8px;border:1px solid #e2e8f0;font-weight:600">Status</td><td style="padding:8px;border:1px solid #e2e8f0">{status}</td></tr>
+</table>
+<p style="color:#64748b;font-size:12px">Sent by Vigil Monitoring</p>
+</div>""",
+        "body_text": "Web App Status Alert — {domain}\n\nName: {domain}\nStatus: {status}\n\nSent by Vigil Monitoring",
+    },
     "ssl_alert": {
         "subject": "[Vigil] SSL Certificate Expiring Soon — {domain}",
         "body_html": """<div style="font-family:sans-serif;max-width:600px;margin:auto;background:#fff">

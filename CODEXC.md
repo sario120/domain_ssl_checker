@@ -20,11 +20,13 @@
 ```
 User Browser  ←→  Flask API  ←→  SQLite (DB)
                         ↑
-            APScheduler (24h interval)
+            APScheduler (configurable interval)
                         ↓
-              SSL Check () + WHOIS Check ()
-                        ↓
-              Alert System (SMTP / Slack / Zulip)
+   +-------------+-------+--------+
+   |             |                |
+SSL Check ()  WHOIS Check ()  Webapp HTTP Check ()
+   |             |                |
+   +------ Alert System (SMTP / Slack / Zulip) ------+
 ```
 
 ### Project Layout
@@ -34,16 +36,18 @@ ssl_checker/
 │   ├── app.py                # Flask app, routes, startup
 │   ├── models.py             # DB schema, CRUD, settings
 │   ├── checker.py            # SSL + WHOIS domain checking
+│   ├── webapp_checker.py     # HTTP/HTTPS webapp checking
 │   ├── scheduler.py          # APScheduler wrapper
 │   ├── alert.py              # SMTP alert dispatch
 │   ├── webhook.py            # Slack / Zulip webhook dispatch
 │   ├── email_templates.py    # HTML/text email template rendering
 │   ├── crypto.py             # Fernet encrypt/decrypt with key fallback
 │   ├── backup.py             # Gzipped SQLite backup + rotation
+│   ├── db.py                 # SQLite / PostgreSQL abstraction
 │   ├── status_utils.py       # Day-based status classification
 │   ├── static/               # Frontend assets (JS, CSS, SVG)
 │   └── templates/            # HTML templates (login.html, index.html)
-├── tests/                    # pytest test suite
+├── tests/                    # pytest test suite (62 tests)
 ├── data_volume/              # SQLite DB (gitignored)
 ├── backups/                  # Gzipped backups (gitignored)
 ├── Dockerfile                # Multi-stage container build
@@ -73,9 +77,10 @@ Two independent systems: SSL (certificate) and Domain (WHOIS expiry). Each uses 
 - **SSL**: expired(<0) / critical(0-4) / warning(5-14) / caution(15-19) / watch(20-29) / healthy(30+)
 - **Domain**: expired(<0) / critical(0-29) / warning(30-59) / caution(60-89) / healthy(90+)
 - "Full" domains get domain status as primary; "SSL-only" domains use SSL status.
+- **Webapp**: up / down / slow / unknown — determined by HTTP status code + response time threshold.
 
 ### 5. Alert Throttling
-Alerts are rate-limited per-domain to once per 24 hours (`last_alerted` column). Check complete summary email also limited to once per day.
+Alerts are rate-limited per-domain to once per 24 hours (`last_alerted` column). Webapp alerts have their own cooldown. Check complete summary email also limited to once per day.
 
 ### 6. Security Model
 - Three roles: `admin` (full access), `user`, `viewer` (read-only dashboard).
@@ -95,7 +100,7 @@ Daily cron at 03:00 via APScheduler. Gzip-compressed SQLite copies with metadata
 - Cards view (default) + table view toggle per domain type.
 - Column visibility, pagination, TLD filtering, status grouping all persisted to `localStorage`.
 - Keyboard shortcuts: `j/k` navigate, `x` select, `a` select all, `/` or `f` search, `c` check selected.
-- Auto-refresh dashboard on configurable interval.
+- Dashboard auto-refresh on configurable interval.
 
 ### 9. Domain / SSL Page Rendering Pattern
 Both "Domains" (full) and "SSL Certificates" pages share identical rendering infrastructure:
@@ -115,10 +120,30 @@ Kebab dropdowns changed from `position: absolute` to `position: fixed` with JS v
 - Admin self-deactivation blocked at route level (`@admin_required` + `current_user.id == user_id` → 403).
 - UI shows Deact/React toggle in user management kebab menu.
 
-### 12. Logs Page Features
-- Search across log messages and usernames.
-- Type filter chips (All / Info / Check / Alert / Error).
-- Summary cards: total logs, check count, alert count, error count.
-- Activity bar chart (last 7 days) rendered with inline SVG/div bars.
-- Pagination with mobile-responsive card view (single-column layout on small screens).
-- `get_logs_summary()` respects `log_type` parameter for filtered counts.
+### 12. Webapp Monitoring Design
+- Webapps stored in separate `webapps` table (not `domains`).
+- HTTP/HTTPS GET check via `requests` library — status code + response time.
+- Statuses: `up` (2xx/3xx, response time < threshold), `slow` (2xx/3xx but slow), `down` (non-2xx/3xx, timeout, or connection error).
+- Response time threshold configurable per webapp (default 5000ms).
+- Per-webapp check interval (separate from domain interval).
+- Results stored in `webapp_results` table; health logs in `webapp_health_log`.
+- History retention configurable via `DATA_RETENTION_DAYS`.
+- Sparklines in webapp card/table show last 20 check statuses.
+
+### 13. URL Normalization
+`normalise_url()` auto-prepends scheme based on hostname heuristics:
+- If hostname has dots and no IP pattern → `https://`
+- If hostname is IP address, `localhost`, or single-word → `http://`
+- Applied at add time (not retroactive). Avoids DNS resolution — purely lexical.
+
+### 14. Dashboard Design
+- Stat cards: 3-column grid — Domains, SSL, Web Apps.
+- Each card shows Down/Slow/Paused counts for webapps, healthy/warning/expired for domains.
+- System Information sidebar card with grouped sections (System, Scheduler), hover highlight.
+- Webapp Failures section lists down/slow webapps with duration.
+- Expiring lists show SSL + Domain entries with 4px colored left-border items.
+- Scheduler status shows next run time and interval text.
+- Auto-refresh every 30s.
+
+### 15. Alert Templates
+Three built-in email templates: `ssl_alert`, `domain_alert`, `webapp_alert`, plus `check_complete` summary. Webapp alerts must use `webapp_alert` template — using `domain_alert` incorrectly would show "Domain Expiring Soon" for webapp status changes.

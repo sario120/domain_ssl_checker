@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Vigil** — a self-hosted SSL certificate & domain expiry monitoring web application.
+**Vigil** — a self-hosted SSL certificate, domain expiry & web app monitoring web application.
 Tech: Flask + SQLite (WAL mode) + APScheduler + vanilla JS frontend.
 
 ## Conventions
@@ -15,9 +15,11 @@ Tech: Flask + SQLite (WAL mode) + APScheduler + vanilla JS frontend.
 - Thread safety for WHOIS via `threading.Lock` + `ThreadPoolExecutor`.
 - SMTP passwords encrypted with `cryptography.fernet.Fernet` before storage.
 - Admin self-deactivation blocked at route level (`@admin_required` + `current_user.id == user_id` check).
+- Webapp checks via `webapp_checker.py` — HTTP/HTTPS GET with status code + response time.
+- URL normalization via `normalise_url()` in `models.py` — auto-prepends `https://` for DNS names, `http://` for IPs/localhost/single-word hosts.
 
 ### Frontend
-- **No framework** — vanilla JS in `static/app.js` (~4955 lines), `static/login.js` (136 lines).
+- **No framework** — vanilla JS in `static/app.js` (~5032 lines), `static/login.js` (136 lines).
 - **Hash-based routing** — `window.location.hash` drives view switching.
 - **Dark/light theme** — toggled via `localStorage`, class on `<body>`.
 - **Event delegation** — all click actions handled via single `data-action` attribute listener.
@@ -25,6 +27,7 @@ Tech: Flask + SQLite (WAL mode) + APScheduler + vanilla JS frontend.
 - **Webapps page** has its own rendering: cards with color-coded left border, card body opens detail modal, 40px sparklines, table sparkline column, filter badge counts replacing stats bar, skeleton loading, Actions dropdown in header, sort dropdown, status-change pulse animation, enhanced empty state.
 - **Webapp detail modal** shows uptime % bars (24h/7d/30d/365d), incident list, response time chart (SVG polyline + area with Y-axis labels, X-axis time labels, hover tooltip with dashed guide line, duration selector 1h/6h/12h/24h/7d/30d/365d), current up/down duration, response time stats (avg/min/max/latest).
 - **Logs page** has search, type filter chips, summary cards (total/check/alert/error), activity bar chart, pagination with mobile card view.
+- **Dashboard** renders stat cards (3-column: Domains, SSL, Web Apps with Down/Slow/Paused), Scheduler Status with dynamic interval text, System Information with div-based card + icons grouped by section (System, Scheduler), Webapp Failures section (down/slow webapps), and Expiring lists (SSL + Domain) with 4px colored left-border items.
 - **Kebab dropdowns** use `position: fixed` with JS viewport clamping to prevent clipping behind any parent container.
 - Domain filters, view mode, pagination state, column visibility, group-by-status persisted in `_cachedDomains`, `_viewMode`, `_pagination`, `_domainFilter`, `_tldFilter`, `selectedDomains`/`selectedSsl` globals.
 - Webapp globals: `_detailWebappId`, `_detailChartHours`, `_timezoneOffsetH` (default 5 for PKT).
@@ -42,6 +45,7 @@ Tech: Flask + SQLite (WAL mode) + APScheduler + vanilla JS frontend.
 - Run: `pytest tests/ -v` (from project root).
 - Test DB uses temp directory, `DB_PATH` overridden in test.
 - Environment variables for testing set in `tests/conftest.py`.
+- 62 test functions across 7 test files.
 
 ### Docker
 - Multi-stage build: `builder` stage compiles deps, runtime stage copies only.
@@ -86,3 +90,6 @@ Tech: Flask + SQLite (WAL mode) + APScheduler + vanilla JS frontend.
 2. If adding a new sort column, add the header in the `<thead>` + column in `applyDomainFilters()` render section + column visibility checkbox in the column-toggle dropdown.
 3. If adding a bulk action, add the button in the `.bulk-toolbar` block and handle it in the global click delegator in `app.js`.
 4. View mode toggling, stats bar, pagination, group-by-status all follow existing patterns — refer to `renderDomainCards()`, `renderDomainTable()`, `updateStats()`, `renderPagination()`, `renderSortBar()`.
+
+### Known Bug Patterns
+- Webapp alerts calling `send_alerts()` with `ssl_days_left=None, domain_days_left=None` — `_send_smtp()` in `alert.py` must detect this and use `"webapp_alert"` template, not fall through to `"domain_alert"`.

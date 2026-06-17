@@ -1,4 +1,6 @@
 (function () {
+  'use strict';
+
   var savedTheme = localStorage.getItem('theme');
   if (savedTheme === 'light') document.body.classList.add('light');
 
@@ -31,7 +33,7 @@
   var loginForm = document.getElementById('login-form');
   var loginBtn = document.getElementById('login-btn');
   var errEl = document.getElementById('login-error');
-  var loginBox = document.querySelector('.login-box');
+  var loginCard = document.getElementById('login-card');
   var usernameInput = document.getElementById('username');
   var rememberInput = document.getElementById('remember-me');
   var inputs = [usernameInput, pwInput].filter(Boolean);
@@ -44,7 +46,7 @@
         usernameInput.value = stored;
         if (rememberInput) rememberInput.checked = true;
       }
-    } catch (e) {}
+    } catch (e) {/* ignore */}
   }
 
   function saveRememberedUsername() {
@@ -54,7 +56,7 @@
       } else {
         localStorage.removeItem('vigil-remembered-username');
       }
-    } catch (e) {}
+    } catch (e) {/* ignore */}
   }
 
   loadRememberedUsername();
@@ -64,7 +66,7 @@
     errEl.style.display = 'none';
     errEl.classList.remove('locked');
     errEl.innerHTML = '';
-    loginBox.classList.remove('shake');
+    loginCard.classList.remove('shake');
     inputs.forEach(function (el) { el.classList.remove('error'); });
   }
 
@@ -75,7 +77,7 @@
 
   function showError(msg, isLocked) {
     errEl.style.display = 'block';
-    loginBox.classList.add('shake');
+    loginCard.classList.add('shake');
     inputs.forEach(function (el) { el.classList.add('error'); });
 
     if (isLocked) {
@@ -109,7 +111,7 @@
       });
       var data = await res.json();
       if (!res.ok) throw { message: data.error || 'Login failed', status: res.status };
-      loginBox.classList.add('fade-out');
+      loginCard.classList.add('fade-out');
       await new Promise(function (r) { setTimeout(r, 250); });
       window.location.href = '/dashboard';
     } catch (err) {

@@ -1,39 +1,43 @@
-# Vigil — Self-Hosted SSL & Domain Expiry Monitor
+# Vigil — Self-Hosted SSL, Domain & Web App Monitor
 
-Monitor SSL certificate and domain registration expiry for all your domains from a single dashboard. Get alerts via email, Slack, or Zulip before things expire.
+Monitor SSL certificate expiry, domain registration expiry, and web app uptime from a single dashboard. Get alerts via email, Slack, or Zulip before things go down.
 
 ## Features
 
 - **SSL Certificate Checking** — TLS handshake to port 443, parses issuer, subject, SANs, validity period
 - **WHOIS Domain Checking** — Queries WHOIS servers for 40+ TLDs with IANA lookup fallback
+- **Web App Monitoring** — HTTP/HTTPS GET checks with status code + response time. Per-webapp check interval.
 - **Dual Domain Types** — "Full" (SSL + WHOIS) or "SSL-only" per domain
 - **Manual Expiry Dates** — Enter dates manually when WHOIS is unreliable
-- **Scheduled Checks** — Configurable interval via APScheduler (default 24h)
+- **Scheduled Checks** — Configurable interval via APScheduler (default 24h for domains, 5min for webapps)
 - **Alert System** — Email (SMTP with STARTTLS/SSL), Slack, Zulip
 - **Summary Emails** — Daily health summary after scheduled checks
-- **Custom Email Templates** — Subject, HTML body, text body per alert type
+- **Custom Email Templates** — Subject, HTML body, text body per alert type (ssl/domain/webapp/check_complete)
 - **User Management** — Role-based (admin/user/viewer), account lockout, password policy
 - **API Key Auth** — Bearer token authentication for headless access
 - **Database Backups** — Automatic daily gzipped backups with restore via UI
-- **Health Snapshots** — Daily trend data with dashboard sparklines
-- **Import/Export** — Bulk domain management (JSON/CSV)
-- **Dashboard** — Stats bar, expiry buckets, expiring lists, activity chart
+- **Health Snapshots** — Daily domain/SSL health data on dashboard
+- **Import/Export** — Bulk domain management (JSON/CSV/TXT), webapp import (JSON/CSV/TXT)
+- **Dashboard** — 3-column stat cards (Domains, SSL, Web Apps), Webapp Failures, Expiring lists, Scheduler Status
 - **Dark/Light Theme** — Persistent preference
 - **Keyboard Shortcuts** — Full keyboard navigation on domain lists
 - **Card/Table Views** — Toggle between grid cards and sortable table
 - **Bulk Actions** — Multi-select, shift-click range, bulk check/delete/export
 - **Audit Logging** — 13 critical actions tracked with type filtering and search
+- **Public Status Page** — Lightweight endpoint for external uptime display
 
 ## Architecture
 
 ```
 Browser  ←→  Flask API  ←→  SQLite / PostgreSQL
                    ↑
-       APScheduler (configurable interval)
+       APScheduler (configurable intervals)
                    ↓
-         SSL Check + WHOIS Check
-                   ↓
-         Alerts (SMTP / Slack / Zulip)
+     +------+------+------+
+     |      |      |       |
+SSL Check  WHOIS  Webapp HTTP Check
+     |      |      |       |
+     +--- Alert System (SMTP / Slack / Zulip) ---+
 ```
 
 ### Tech Stack
@@ -57,6 +61,7 @@ ssl_checker/
 │   ├── app.py                # Flask app, routes, middleware, startup
 │   ├── models.py             # DB schema, CRUD, queries
 │   ├── checker.py            # SSL + WHOIS checking logic
+│   ├── webapp_checker.py     # HTTP/HTTPS webapp checking
 │   ├── scheduler.py          # APScheduler wrapper
 │   ├── alert.py              # SMTP alert dispatch
 │   ├── webhook.py            # Slack / Zulip dispatch
@@ -67,7 +72,7 @@ ssl_checker/
 │   ├── status_utils.py       # Day-based status classification
 │   ├── static/               # JS, CSS, assets
 │   └── templates/            # HTML templates
-├── tests/                    # pytest test suite (48 passing)
+├── tests/                    # pytest test suite (62 passing)
 ├── data_volume/              # SQLite DB (gitignored)
 ├── backups/                  # Gzipped backups (gitignored)
 ├── Dockerfile                # Multi-stage build
@@ -105,106 +110,148 @@ gunicorn --workers 1 --threads 4 --bind 0.0.0.0:5000 \
   --chdir ssl_domain_checker app:app
 ```
 
-### systemd (production bare-metal)
+## Setup from Scratch (New Server)
+
+### 1. System Prerequisites
+
+```bash
+# Debian / Ubuntu
+apt update && apt upgrade -y
+apt install -y python3 python3-pip python3-venv git curl nginx certbot
+
+# Verify versions
+python3 --version   # must be 3.12+
+```
+
+### 2. Create System User
 
 ```bash
 sudo useradd -r -s /bin/false vigil
 sudo mkdir -p /opt/ssl_checker
 sudo chown vigil:vigil /opt/ssl_checker
+```
 
-git clone <repo-url> /opt/ssl_checker
+### 3. Clone & Set Up
 
-cd /opt/ssl_checker
-python3 -m venv venv
-source venv/bin/activate
-pip install -r ssl_domain_checker/requirements.txt
-cp .env.sample .env
-# Edit .env — set SECRET_KEY, ENCRYPTION_KEY, etc.
+```bash
+sudo -u vigil -H bash -c '
+  cd /opt/ssl_checker
+  git clone <repo-url> .
+  python3 -m venv venv
+  source venv/bin/activate
+  pip install --upgrade pip
+  pip install -r ssl_domain_checker/requirements.txt
+  cp .env.sample .env
+'
+```
 
-sudo cp ssl_checker.service /etc/systemd/system/
+### 4. Configure Environment
+
+Edit `/opt/ssl_checker/.env`:
+
+```bash
+# Generate SECRET_KEY
+python3 -c "import secrets; print(secrets.token_hex(32))"
+
+# Generate ENCRYPTION_KEY
+python3 -c "import secrets; import base64,hashlib; \
+  print(base64.urlsafe_b64encode(hashlib.sha256(secrets.token_bytes(32)).digest()).decode())"
+
+# Set at minimum:
+SECRET_KEY=<generated>
+ENCRYPTION_KEY=<generated>
+ADMIN_PASSWORD=<choose a strong password>
+TIMEZONE=Asia/Karachi        # change to your timezone
+PORT=5000
+SCHEDULER_INTERVAL_HOURS=24
+WEBAPP_CHECK_INTERVAL_SECONDS=300
+HTTPS=1                       # enable behind nginx proxy
+```
+
+### 5. Set Up systemd Service
+
+```bash
+sudo cp /opt/ssl_checker/ssl_checker.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now ssl_checker
+sudo journalctl -u ssl_checker -f   # watch startup logs
 ```
 
-## Setup from Scratch (Detailed)
+The admin password will be logged on first start. Check:
+```bash
+sudo journalctl -u ssl_checker | grep "Admin password"
+```
+Or if you set `ADMIN_PASSWORD` in `.env`, use that.
 
-### 1. Prerequisites
+### 6. Set Up Reverse Proxy (nginx)
 
-- **Python 3.12+** (check with `python3 --version`)
-- **pip** and **venv** (`apt install python3-pip python3-venv` on Debian/Ubuntu)
-- **Docker + Docker Compose** (optional, for containerized deployment)
-- **PostgreSQL 15+** (optional, for PG backend instead of SQLite)
-- **Reverse proxy** (nginx/caddy) recommended for production HTTPS termination
+```nginx
+# /etc/nginx/sites-available/vigil
+server {
+    listen 80;
+    server_name vigil.yourdomain.com;
 
-### 2. Get the Code
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+}
+```
 
 ```bash
-git clone <repo-url> vigil
-cd vigil
+sudo ln -s /etc/nginx/sites-available/vigil /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
-### 3. Configure Environment
+### 7. Enable HTTPS (Let's Encrypt)
 
 ```bash
-cp .env.sample .env
+sudo certbot --nginx -d vigil.yourdomain.com
+sudo systemctl enable certbot.timer   # auto-renewal
 ```
 
-Minimum required variables in `.env`:
+### 8. Configure Firewall
 
-| Variable | How to generate |
-|----------|----------------|
-| `SECRET_KEY` | `python3 -c "import secrets; print(secrets.token_hex(32))"` |
-| `ENCRYPTION_KEY` | `python3 -c "import secrets; import base64,hashlib; print(base64.urlsafe_b64encode(hashlib.sha256(secrets.token_bytes(32)).digest()).decode())"` |
-| `ADMIN_PASSWORD` | Set a strong password, or leave empty for auto-generated |
-
-Other common settings:
-
-- `TIMEZONE` — Set to your IANA timezone (default: `Asia/Karachi`)
-- `DB_TYPE` — `sqlite` (default) or `postgresql`
-- `SCHEDULER_INTERVAL_HOURS` — How often to auto-check domains (default: `24`)
-- `HTTPS=1` — Enable Secure cookies when behind HTTPS reverse proxy
-
-### 4. Run
-
-**Docker:**
 ```bash
-docker compose up -d
-docker logs vigil -f  # watch for the admin password
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
 ```
 
-**Bare-metal (development):**
-```bash
-source venv/bin/activate
-python ssl_domain_checker/app.py
-```
+### 9. First Login
 
-**Bare-metal (production):**
-```bash
-source venv/bin/activate
-gunicorn --workers 1 --threads 4 --bind 127.0.0.1:5000 \
-  --timeout 120 --chdir ssl_domain_checker app:app
-```
-
-### 5. First Login
-
-1. Open `http://your-host:5000` (or `http://localhost:8010` with Docker)
+1. Open `https://vigil.yourdomain.com`
 2. Username: `admin`
-3. Password:
-   - If `ADMIN_PASSWORD` was set in `.env`, use that
-   - Otherwise, check `data_volume/admin_credentials.txt` (or `docker exec vigil cat /app/data_volume/admin_credentials.txt`)
-4. Go to Settings to configure SMTP, webhooks, alert thresholds
+3. Password: the admin password from step 5
+4. Go to **Settings** to configure SMTP, webhooks, alert thresholds
 
-### 6. PostgreSQL Setup (Optional)
+### 10. Post-Install Checks
 
-Create the database and schema manually, then set `DB_TYPE=postgresql` in `.env`:
+```bash
+# Check service status
+sudo systemctl status ssl_checker
 
-```sql
-CREATE DATABASE vigil;
-CREATE SCHEMA IF NOT EXISTS vigil;
-CREATE USER vigil_user WITH PASSWORD 'strong_password';
-GRANT ALL PRIVILEGES ON DATABASE vigil TO vigil_user;
-GRANT ALL ON SCHEMA vigil TO vigil_user;
+# Check logs
+sudo journalctl -u ssl_checker -n 50 --no-pager
+
+# Verify API
+curl https://vigil.yourdomain.com/api/health
+
+# Test database
+curl -u admin:password https://vigil.yourdomain.com/api/dashboard/summary
 ```
+
+### Restarting After Changes
+
+```bash
+sudo systemctl restart ssl_checker
+```
+
+Gunicorn spawns new workers on restart; the scheduler restarts automatically via `post_worker_init`.
 
 ## API Reference
 
@@ -226,18 +273,36 @@ GRANT ALL ON SCHEMA vigil TO vigil_user;
 | POST | `/api/domains` | Admin+CSRF | Add domain |
 | PUT | `/api/domains/<id>` | Admin+CSRF | Update domain |
 | DELETE | `/api/domains/<id>` | Admin+CSRF | Delete domain |
-| GET | `/api/domains/export` | Admin | Export as JSON |
-| POST | `/api/domains/import` | Admin+CSRF | Import from JSON |
+| GET | `/api/domains/export` | Admin | Export as JSON/CSV/TXT |
+| POST | `/api/domains/import` | Admin+CSRF | Import from JSON/CSV/TXT |
 | POST | `/api/domains/<id>/check` | Admin+CSRF | Check single domain |
 | POST | `/api/check-all` | Admin+CSRF | Check all domains |
 | GET | `/api/domains/<id>/cert` | Login | Certificate details |
+
+### Web Apps
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/webapps` | Login | List webapps |
+| POST | `/api/webapps` | Admin+CSRF | Add webapp |
+| PUT | `/api/webapps/<id>` | Admin+CSRF | Update webapp |
+| DELETE | `/api/webapps/<id>` | Admin+CSRF | Delete webapp |
+| POST | `/api/webapps/bulk-delete` | Admin+CSRF | Bulk delete |
+| POST | `/api/webapps/bulk-check` | Admin+CSRF | Check selected |
+| POST | `/api/webapps/<id>/check` | Admin+CSRF | Check single webapp |
+| POST | `/api/webapps/check-all` | Admin+CSRF | Check all webapps |
+| GET | `/api/webapps/<id>/detail` | Login | Detail/downtime data |
+| GET | `/api/webapps/stats` | Login | Statistics |
+| GET | `/api/webapps/export/csv` | Admin | Export as CSV |
+| POST | `/api/webapps/import` | Admin+CSRF | Import from JSON/CSV/TXT |
+| GET | `/api/webapps/status/public` | None | Public status page |
 
 ### Dashboard & Health
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/dashboard/summary` | Login | Dashboard stats, expiring lists, snapshots |
-| GET | `/api/scheduler/status` | Login | Next scheduled run |
+| GET | `/api/dashboard/summary` | Login | Dashboard stats, expiring lists, webapp failures |
+| GET | `/api/scheduler/status` | Login | Next scheduled run + intervals |
 | GET | `/api/health` | None | Health check |
 
 ### Settings & Users
@@ -250,6 +315,7 @@ GRANT ALL ON SCHEMA vigil TO vigil_user;
 | POST | `/api/settings/test-webhook` | Admin+CSRF | Test webhook |
 | GET | `/api/email-templates` | Admin | Get templates |
 | PUT | `/api/email-templates/<name>` | Admin+CSRF | Update template |
+| PUT | `/api/email-templates/reset` | Admin+CSRF | Reset to defaults |
 | GET | `/api/users` | Admin | List users |
 | POST | `/api/users` | Admin+CSRF | Create user |
 | PUT | `/api/users/<id>` | Admin+CSRF | Update user |
@@ -291,7 +357,8 @@ See `.env.sample` for all variables with documentation. Key variables:
 | `HTTPS` | `1` | Enable Secure cookies + HSTS |
 | `TIMEZONE` | `Asia/Karachi` | IANA timezone for timestamps |
 | `SESSION_LIFETIME_HOURS` | `4` | Max session lifetime (max 4) |
-| `SCHEDULER_INTERVAL_HOURS` | `24` | Auto-check interval |
+| `SCHEDULER_INTERVAL_HOURS` | `24` | Auto-check interval (domains) |
+| `WEBAPP_CHECK_INTERVAL_SECONDS` | `300` | Auto-check interval (webapps) |
 | `CHECK_WORKERS` | `20` | ThreadPoolExecutor size |
 | `DATA_RETENTION_DAYS` | `90` | Old data retention period |
 | `RATE_LIMIT_DEFAULT` | `200 per day,50 per hour` | API rate limit |
@@ -310,9 +377,7 @@ See `.env.sample` for all variables with documentation. Key variables:
 On first startup (empty `users` table), Vigil creates an admin user:
 1. Username: `admin`
 2. Password: `ADMIN_PASSWORD` env var, or auto-generated 32-char random password
-3. Auto-generated password written to `data_volume/admin_credentials.txt`
-
-See `create_admin_user.info` for password reset and API key workflows.
+3. Auto-generated password logged to stderr at startup
 
 ### Security Settings
 
@@ -324,7 +389,7 @@ Configured via Settings > Security in the UI:
 
 ## Monitoring
 
-### Status Classification
+### Domain/SSL Status Classification
 
 **SSL Certificates:**
 | Bucket | Days Left |
@@ -345,13 +410,24 @@ Configured via Settings > Security in the UI:
 | Caution | 60–89 |
 | Healthy | 90+ |
 
+### Web App Status
+
+| Status | Criteria |
+|--------|----------|
+| up | HTTP 2xx/3xx, response time < threshold |
+| slow | HTTP 2xx/3xx, response time >= threshold |
+| down | HTTP error, timeout, or connection failure |
+| unknown | Not yet checked |
+
 ### Alert Thresholds
 
 Configure per-domain or globally:
 - **SSL alert threshold** — Days before SSL expiry to trigger alert (default: 30)
 - **Domain alert threshold** — Days before domain expiry to trigger alert (default: 60)
+- **Webapp down alerts** — Sent on transition from up→down (notify_on_down)
+- **Webapp recovery alerts** — Sent on transition from down→up (notify_on_recovery)
 
-Alerts are rate-limited to once per 24 hours per domain. Summary email is sent at most once per day.
+Alerts are rate-limited to once per 24 hours per domain/webapp. Summary email is sent at most once per day.
 
 ## Database
 
@@ -376,10 +452,8 @@ Alerts are rate-limited to once per 24 hours per domain. Summary email is sent a
 ## Testing
 
 ```bash
-pytest tests/ -v
-# Specific test file
+pytest tests/ -v          # 62 tests
 pytest tests/test_models.py -v
-# With coverage
 pytest tests/ --cov=ssl_domain_checker -v
 ```
 
@@ -421,6 +495,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now ssl_checker
 sudo journalctl -u ssl_checker -f  # watch logs
 ```
+
+Verify the service started correctly and note the admin password in logs.
 
 ## Backups
 
