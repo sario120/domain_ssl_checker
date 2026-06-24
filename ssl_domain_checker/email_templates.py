@@ -10,11 +10,13 @@ DEFAULT_TEMPLATES = {
 <p><strong>{domain}</strong> status changed to <strong>{status}</strong>.</p>
 <table style="border-collapse:collapse;width:100%;margin:16px 0">
 <tr><td style="padding:8px;border:1px solid #e2e8f0;font-weight:600;width:40%">Name</td><td style="padding:8px;border:1px solid #e2e8f0">{domain}</td></tr>
+<tr><td style="padding:8px;border:1px solid #e2e8f0;font-weight:600">URL</td><td style="padding:8px;border:1px solid #e2e8f0">{url}</td></tr>
 <tr><td style="padding:8px;border:1px solid #e2e8f0;font-weight:600">Status</td><td style="padding:8px;border:1px solid #e2e8f0">{status}</td></tr>
+<tr><td style="padding:8px;border:1px solid #e2e8f0;font-weight:600">Status Code</td><td style="padding:8px;border:1px solid #e2e8f0">{status_code}</td></tr>
 </table>
 <p style="color:#64748b;font-size:12px">Sent by Vigil Monitoring</p>
 </div>""",
-        "body_text": "Web App Status Alert — {domain}\n\nName: {domain}\nStatus: {status}\n\nSent by Vigil Monitoring",
+        "body_text": "Web App Status Alert — {domain}\n\nName: {domain}\nURL: {url}\nStatus: {status}\nStatus Code: {status_code}\n\nSent by Vigil Monitoring",
     },
     "ssl_alert": {
         "subject": "[Vigil] SSL Certificate Expiring Soon — {domain}",

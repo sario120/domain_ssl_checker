@@ -4,27 +4,30 @@ Monitor SSL certificate expiry, domain registration expiry, and web app uptime f
 
 ## Features
 
-- **SSL Certificate Checking** — TLS handshake to port 443, parses issuer, subject, SANs, validity period
-- **WHOIS Domain Checking** — Queries WHOIS servers for 40+ TLDs with IANA lookup fallback
-- **Web App Monitoring** — HTTP/HTTPS GET checks with status code + response time. Per-webapp check interval.
-- **Dual Domain Types** — "Full" (SSL + WHOIS) or "SSL-only" per domain
-- **Manual Expiry Dates** — Enter dates manually when WHOIS is unreliable
-- **Scheduled Checks** — Configurable interval via APScheduler (default 24h for domains, 5min for webapps)
-- **Alert System** — Email (SMTP with STARTTLS/SSL), Slack, Zulip
-- **Summary Emails** — Daily health summary after scheduled checks
-- **Custom Email Templates** — Subject, HTML body, text body per alert type (ssl/domain/webapp/check_complete)
-- **User Management** — Role-based (admin/user/viewer), account lockout, password policy
-- **API Key Auth** — Bearer token authentication for headless access
-- **Database Backups** — Automatic daily gzipped backups with restore via UI
-- **Health Snapshots** — Daily domain/SSL health data on dashboard
-- **Import/Export** — Bulk domain management (JSON/CSV/TXT), webapp import (JSON/CSV/TXT)
-- **Dashboard** — 3-column stat cards (Domains, SSL, Web Apps), Webapp Failures, Expiring lists, Scheduler Status
-- **Dark/Light Theme** — Persistent preference
-- **Keyboard Shortcuts** — Full keyboard navigation on domain lists
-- **Card/Table Views** — Toggle between grid cards and sortable table
-- **Bulk Actions** — Multi-select, shift-click range, bulk check/delete/export
-- **Audit Logging** — 13 critical actions tracked with type filtering and search
-- **Public Status Page** — Lightweight endpoint for external uptime display
+- **SSL Certificate Checking** — TLS handshake to port 443. Captures issuer, subject, SANs, validity period, TLS version, cipher suite, SHA-256 fingerprint, serial number, and full PEM chain.
+- **WHOIS Domain Checking** — Queries WHOIS servers for 40+ TLDs with IANA lookup fallback.
+- **Web App Monitoring** — HTTP/HTTPS checks with status code + response time. Per-webapp check interval and response time threshold.
+- **Certificate Details Modal** — Rich modal showing Identity (domain, issuer, subject), Validity (dates, days left, 30-day sparkline trend), Security (TLS version, cipher, fingerprint, serial), SANs, Metadata, PEM viewer, Check Now, and live last-checked.
+- **Dual Domain Types** — "Full" (SSL + WHOIS) or "SSL-only" per domain.
+- **Manual Expiry Dates** — Enter dates manually when WHOIS is unreliable.
+- **Scheduled Checks** — Configurable interval via APScheduler (default 24h for domains, per-webapp for apps).
+- **Alert System** — Email (SMTP with STARTTLS/SSL), Slack, Zulip.
+- **Summary Emails** — Daily health summary after scheduled checks.
+- **Custom Email Templates** — Subject, HTML body, text body per alert type (ssl/domain/webapp/check_complete).
+- **User Management** — Role-based (admin/user/viewer), account lockout, password policy.
+- **API Key Auth** — Bearer token authentication for headless access.
+- **Database Backups** — Automatic daily gzipped backups with restore via UI.
+- **Health Snapshots** — Daily domain/SSL health data on dashboard.
+- **Import/Export** — Bulk domain management (JSON/CSV/TXT), webapp import/export.
+- **Dashboard** — 3-column stat cards (Domains, SSL, Web Apps) with health scores, Webapp Failures, Expiring lists (SSL + Domain), Scheduler Status, System Information, auto-refresh.
+- **Dark/Light Theme** — Persistent preference via localStorage.
+- **Keyboard Shortcuts** — Full keyboard navigation on domain lists (j/k navigate, x select, a select all, / search, c check).
+- **Card/Table Views** — Toggle between grid cards and sortable table on Domains and SSL pages.
+- **Bulk Actions** — Multi-select with shift-click range, bulk check/delete/export/notes/tags/compare/print.
+- **Sort & Filter** — Sort by Name/Status/Days Left/Last Checked, filter by status/ search/TLD, group by status, column visibility.
+- **Audit Logging** — 13 critical actions tracked with type filtering, search, and activity chart.
+- **Public Status Page** — `GET /api/webapps/status/public` for external uptime display.
+- **Prometheus Metrics** — `GET /api/metrics` for domain status counts.
 
 ## Architecture
 
@@ -35,7 +38,7 @@ Browser  ←→  Flask API  ←→  SQLite / PostgreSQL
                    ↓
      +------+------+------+
      |      |      |       |
-SSL Check  WHOIS  Webapp HTTP Check
+SSL Check  WHOIS  Webapp Check
      |      |      |       |
      +--- Alert System (SMTP / Slack / Zulip) ---+
 ```
@@ -48,10 +51,10 @@ SSL Check  WHOIS  Webapp HTTP Check
 | Framework | Flask 3.x |
 | Database | SQLite (WAL mode) or PostgreSQL |
 | Scheduler | APScheduler 3.x |
-| WSGI | Gunicorn |
+| WSGI | Gunicorn (gthread worker) |
 | Encryption | cryptography (Fernet) |
 | Frontend | Vanilla JS + CSS (no build step) |
-| Container | Docker multi-stage (~130MB) |
+| Container | Docker multi-stage (~130MB), non-root user |
 
 ### Project Layout
 
@@ -59,7 +62,7 @@ SSL Check  WHOIS  Webapp HTTP Check
 ssl_checker/
 ├── ssl_domain_checker/       # Python package
 │   ├── app.py                # Flask app, routes, middleware, startup
-│   ├── models.py             # DB schema, CRUD, queries
+│   ├── models.py             # DB schema, CRUD, queries, migrations
 │   ├── checker.py            # SSL + WHOIS checking logic
 │   ├── webapp_checker.py     # HTTP/HTTPS webapp checking
 │   ├── scheduler.py          # APScheduler wrapper
@@ -70,16 +73,35 @@ ssl_checker/
 │   ├── backup.py             # Backup + rotation
 │   ├── db.py                 # SQLite / PostgreSQL abstraction
 │   ├── status_utils.py       # Day-based status classification
-│   ├── static/               # JS, CSS, assets
+│   ├── __init__.py           # Package init
+│   ├── static/               # JS, CSS, SVG, PNG
+│   │   ├── app.js            # Main SPA (~5864 lines)
+│   │   ├── login.js          # Login page JS (138 lines)
+│   │   ├── style.css         # All styles (~2030 lines)
+│   │   ├── favicon.svg
+│   │   ├── logo.svg
+│   │   └── logo20.png
 │   └── templates/            # HTML templates
-├── tests/                    # pytest test suite (62 passing)
+│       ├── index.html        # Main SPA shell
+│       └── login.html        # Login page
+├── tests/                    # pytest test suite (62 passing, 7 files)
+│   ├── __init__.py
+│   ├── conftest.py           # Fixtures, env setup
+│   ├── test_checker.py
+│   ├── test_crypto.py
+│   ├── test_models.py
+│   ├── test_status_utils.py
+│   ├── test_webapps.py
+│   └── test_webhook.py
 ├── data_volume/              # SQLite DB (gitignored)
 ├── backups/                  # Gzipped backups (gitignored)
 ├── Dockerfile                # Multi-stage build
-├── docker-compose.yml        # Service definition
+├── docker-compose.yml        # Service definition with healthcheck
 ├── gunicorn.conf.py          # Scheduler init hook
-├── ssl_checker.service       # systemd unit
-└── .env.sample               # Configuration template
+├── ssl_checker.service       # systemd unit with security hardening
+├── AGENTS.md                 # AI agent instructions (dev-only)
+├── .env.sample               # Configuration template
+└── README.md                 # This file
 ```
 
 ## Quick Start
@@ -106,11 +128,10 @@ source venv/bin/activate
 pip install -r ssl_domain_checker/requirements.txt
 cp .env.sample .env
 # Edit .env — set SECRET_KEY, ENCRYPTION_KEY, DB_PATH
-gunicorn --workers 1 --threads 4 --bind 0.0.0.0:5000 \
-  --chdir ssl_domain_checker app:app
+gunicorn -c gunicorn.conf.py app:app
 ```
 
-## Setup from Scratch (New Server)
+## Production Setup (New Server)
 
 ### 1. System Prerequisites
 
@@ -241,17 +262,9 @@ sudo journalctl -u ssl_checker -n 50 --no-pager
 # Verify API
 curl https://vigil.yourdomain.com/api/health
 
-# Test database
+# Check dashboard data
 curl -u admin:password https://vigil.yourdomain.com/api/dashboard/summary
 ```
-
-### Restarting After Changes
-
-```bash
-sudo systemctl restart ssl_checker
-```
-
-Gunicorn spawns new workers on restart; the scheduler restarts automatically via `post_worker_init`.
 
 ## API Reference
 
@@ -268,7 +281,7 @@ Gunicorn spawns new workers on restart; the scheduler restarts automatically via
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/domains` | Login | List domains |
+| GET | `/api/domains` | Login | List domains (query: type, page, limit) |
 | GET | `/api/domains/all` | Login | All domains grouped by type |
 | POST | `/api/domains` | Admin+CSRF | Add domain |
 | PUT | `/api/domains/<id>` | Admin+CSRF | Update domain |
@@ -278,6 +291,7 @@ Gunicorn spawns new workers on restart; the scheduler restarts automatically via
 | POST | `/api/domains/<id>/check` | Admin+CSRF | Check single domain |
 | POST | `/api/check-all` | Admin+CSRF | Check all domains |
 | GET | `/api/domains/<id>/cert` | Login | Certificate details |
+| GET | `/api/domains/<id>/history` | Login | Check history (query: days) |
 
 ### Web Apps
 
@@ -292,6 +306,7 @@ Gunicorn spawns new workers on restart; the scheduler restarts automatically via
 | POST | `/api/webapps/<id>/check` | Admin+CSRF | Check single webapp |
 | POST | `/api/webapps/check-all` | Admin+CSRF | Check all webapps |
 | GET | `/api/webapps/<id>/detail` | Login | Detail/downtime data |
+| GET | `/api/webapps/<id>/results` | Login | Check results |
 | GET | `/api/webapps/stats` | Login | Statistics |
 | GET | `/api/webapps/export/csv` | Admin | Export as CSV |
 | POST | `/api/webapps/import` | Admin+CSRF | Import from JSON/CSV/TXT |
@@ -309,8 +324,10 @@ Gunicorn spawns new workers on restart; the scheduler restarts automatically via
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/settings` | Admin | Get settings |
+| GET | `/api/settings` | Admin | Get settings (password masked) |
 | PUT | `/api/settings` | Admin+CSRF | Update settings |
+| GET | `/api/settings/export` | Admin | Export settings as JSON |
+| POST | `/api/settings/import` | Admin+CSRF | Import settings from JSON |
 | POST | `/api/settings/test-smtp` | Admin+CSRF | Test SMTP |
 | POST | `/api/settings/test-webhook` | Admin+CSRF | Test webhook |
 | GET | `/api/email-templates` | Admin | Get templates |
@@ -331,6 +348,7 @@ Gunicorn spawns new workers on restart; the scheduler restarts automatically via
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/logs` | Admin | List audit logs |
+| POST | `/api/logs` | Admin+CSRF | Create log entry |
 | GET | `/api/backups` | Admin | List backups |
 | POST | `/api/backups` | Admin+CSRF | Create backup |
 | POST | `/api/backups/restore` | Admin+CSRF | Restore from backup |
@@ -364,28 +382,37 @@ See `.env.sample` for all variables with documentation. Key variables:
 | `RATE_LIMIT_DEFAULT` | `200 per day,50 per hour` | API rate limit |
 | `RATE_LIMIT_LOGIN` | `10 per minute` | Login rate limit |
 
-## User Management
+## Security Hardening
 
-### Roles
+### Systemd Hardening
 
-- **admin** — Full access: manage domains, settings, users, API keys, backups
-- **user** — Can manage domains and view settings
-- **viewer** — Read-only dashboard access
+The provided `ssl_checker.service` applies:
 
-### First-Run Admin
+- **PrivateTmp=true** — /tmp isolated per service
+- **ProtectSystem=full** — /usr and /etc read-only
+- **ProtectHome=true** — /home, /root, /run/user inaccessible
+- **NoNewPrivileges=true** — Prevents privilege escalation
+- **CapabilityBoundingSet=** — No kernel capabilities granted
+- **MemoryMax=1G** — Hard memory limit
+- **CPUQuota=100%** — Limits to 1 CPU core
+- **ReadWritePaths=** — Only data/backups/config writable
 
-On first startup (empty `users` table), Vigil creates an admin user:
-1. Username: `admin`
-2. Password: `ADMIN_PASSWORD` env var, or auto-generated 32-char random password
-3. Auto-generated password logged to stderr at startup
+### Docker Hardening
 
-### Security Settings
+- Non-root `vigil` user (UID 1000)
+- `no-new-privileges:true` in docker-compose
+- `read_only: true` root filesystem
+- `tmpfs: /tmp` for writable temp space
+- Resource limits (1 CPU, 1GB RAM)
+- Healthcheck for automatic container recovery
 
-Configured via Settings > Security in the UI:
+### Network Security
 
-- Password policy (min length, uppercase, lowercase, digit, special char)
-- Account lockout (max failed attempts, lockout duration)
-- Session timeout
+- Rate-limited login (10/min)
+- CSRF protection via X-CSRF-Token header
+- Session timeout (configurable, default 4h)
+- SMTP passwords encrypted at rest (Fernet)
+- Security headers: HSTS, CSP, X-Frame-Options, Referrer-Policy, Permissions-Policy
 
 ## Monitoring
 
@@ -447,56 +474,7 @@ Alerts are rate-limited to once per 24 hours per domain/webapp. Summary email is
 
 ### Schema Versioning
 
-`schema_version` table tracks the schema version (`SCHEMA_VERSION = 1`). Migrations use `ALTER TABLE ADD COLUMN IF NOT EXISTS` pattern.
-
-## Testing
-
-```bash
-pytest tests/ -v          # 62 tests
-pytest tests/test_models.py -v
-pytest tests/ --cov=ssl_domain_checker -v
-```
-
-Test config is in `tests/conftest.py` — uses temp DB, sets required env vars.
-
-## Docker
-
-### Build
-
-```bash
-docker compose build
-# Or manually:
-docker build -t vigil:latest .
-```
-
-### Multi-stage Build
-
-- **Builder stage** — Installs Python dependencies
-- **Runtime stage** — Slim `python:3.12-slim`, copies only site-packages and app code
-- Non-root `vigil` user (UID 1000)
-
-### Resource Limits (docker-compose.yml)
-
-- CPU: 1 core
-- Memory: 1 GB
-
-## systemd Service
-
-The provided `ssl_checker.service` expects:
-- Working directory: `/opt/ssl_checker`
-- Virtual env: `/opt/ssl_checker/venv/`
-- Environment file: `/opt/ssl_checker/.env`
-- Gunicorn listening on `127.0.0.1:5000`
-
-Setup:
-```bash
-sudo cp ssl_checker.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now ssl_checker
-sudo journalctl -u ssl_checker -f  # watch logs
-```
-
-Verify the service started correctly and note the admin password in logs.
+`schema_version` table tracks the schema version. Migrations use `ALTER TABLE ADD COLUMN` guarded by `PRAGMA table_info()` / `db.table_columns()`.
 
 ## Backups
 
@@ -506,6 +484,14 @@ Verify the service started correctly and note the admin password in logs.
 - Pre-restore snapshot created automatically
 - Retention: 30 backups (configurable via `MAX_BACKUPS`)
 - Manual backup/restore available via UI
+- Backup directory bind-mounted in Docker: `./vigil-backups:/app/backups`
+
+## Disaster Recovery
+
+1. **Service failure** — systemd `Restart=always` + Docker `restart: unless-stopped` auto-recover
+2. **Data corruption** — Restore from backup via UI (Settings > Backups > Restore)
+3. **Full server loss** — Copy `vigil-data` and `vigil-backups` directories to new server, restore from latest backup
+4. **Rollback** — Deploy previous Docker image tag; DB migrations are additive only
 
 ## Prometheus Metrics
 
@@ -519,6 +505,15 @@ vigil_domain_status_count{status="watch"} 3
 # TYPE vigil_last_check_timestamp gauge
 vigil_last_check_timestamp 1.712345e+09
 ```
+
+## Testing
+
+```bash
+pytest tests/ -v          # 62 tests, 7 test files
+pytest tests/ --cov=ssl_domain_checker -v   # with coverage
+```
+
+Test config is in `tests/conftest.py` — uses temp DB, sets required env vars.
 
 ## License
 

@@ -45,9 +45,16 @@ ssl_checker/
 │   ├── backup.py             # Gzipped SQLite backup + rotation
 │   ├── db.py                 # SQLite / PostgreSQL abstraction
 │   ├── status_utils.py       # Day-based status classification
-│   ├── static/               # Frontend assets (JS, CSS, SVG)
+│   ├── __init__.py           # Package init
+│   ├── static/               # Frontend assets (JS, CSS, SVG, PNG)
+│   │   ├── app.js            # Main SPA (~5864 lines)
+│   │   ├── login.js          # Login page JS (138 lines)
+│   │   ├── style.css         # All styles (~2030 lines)
+│   │   ├── favicon.svg
+│   │   ├── logo.svg
+│   │   └── logo20.png
 │   └── templates/            # HTML templates (login.html, index.html)
-├── tests/                    # pytest test suite (62 tests)
+├── tests/                    # pytest test suite (62 tests, 7 files)
 ├── data_volume/              # SQLite DB (gitignored)
 ├── backups/                  # Gzipped backups (gitignored)
 ├── Dockerfile                # Multi-stage container build

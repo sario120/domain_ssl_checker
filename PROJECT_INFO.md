@@ -6,9 +6,10 @@ Vigil is a self-hosted web application that monitors SSL certificate expiry, dom
 
 ## Core Features
 
-- **SSL Certificate Checking** — Connects to port 443, retrieves the certificate, parses notBefore/notAfter, issuer, subject, SANs.
+- **SSL Certificate Checking** — Connects to port 443, retrieves the certificate, parses notBefore/notAfter, issuer, subject, SANs, TLS version, cipher suite, SHA-256 fingerprint, serial number, and full PEM chain.
 - **WHOIS Domain Checking** — Queries WHOIS servers for domain expiry dates. Supports 40+ TLDs directly with IANA lookup fallback.
 - **Web App Monitoring** — HTTP/HTTPS GET checks with status code + response time. Statuses: up, down, slow. Per-webapp check interval.
+- **Certificate Details Modal** — Rich modal showing Identity, Validity (dates, days left, 30-day sparkline trend), Security (TLS version, cipher, fingerprint, serial), SANs, Metadata, PEM viewer, Check Now, and live last-checked.
 - **Dual Domain Types** — "Full" domains get both SSL + WHOIS checks; "SSL-only" domains get cert checks only.
 - **Manual Expiry Dates** — Domains can have manual expiry dates entered when WHOIS is unreliable.
 - **Scheduled Checks** — APScheduler runs checks at configurable intervals (default 24h for domains, per-webapp interval for apps).
@@ -23,14 +24,13 @@ Vigil is a self-hosted web application that monitors SSL certificate expiry, dom
 - **Dark/Light Theme** — Persistent theme preference.
 - **Keyboard Shortcuts** — Full keyboard navigation on domain lists.
 - **Card/Table View Toggle** — Switch between grid cards and sortable table on Domains and SSL pages.
-- **Sort Bar** — Sort by Name, Status, Days Left, Last Checked; column visibility dropdown.
-- **Stats Bar** — Live counts for Total, Healthy, Watch, Expired, Error.
-- **Filter Chips** — Domain status filter chips, search input, TLD dropdown on both domain and SSL views.
+- **Sort & Filter** — Sort by Name/Status/Days Left/Last Checked, filter by status/search/TLD, group by status, column visibility.
 - **Pagination** — Configurable page size (25/50/100), first/prev/next/last navigation.
 - **Bulk Actions** — Select-all, shift-click range selection, bulk check/delete/export/notes/tags/compare/print.
 - **Logs Page** — Search, type filter chips, summary cards (total/check/alert/error), activity bar chart, pagination with mobile card view.
-- **Dashboard** — Stat cards (3-column with Domains, SSL, Web Apps), Scheduler Status, System Information, Webapp Failures section, Expiring lists.
+- **Dashboard** — Stat cards (3-column with Domains, SSL, Web Apps), Scheduler Status, System Information, Webapp Failures section, Expiring lists (SSL + Domain).
 - **Public Status Page** — `GET /api/webapps/status/public` endpoint for external uptime display.
+- **Prometheus Metrics** — `GET /api/metrics` for domain status counts.
 
 ## API Reference
 
@@ -45,16 +45,17 @@ Vigil is a self-hosted web application that monitors SSL certificate expiry, dom
 ### Domains
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/domains` | Login | List domains (?type=full/ssl_only, ?page, ?limit) |
-| GET | `/api/domains/all` | Login | List all domains grouped by type |
+| GET | `/api/domains` | Login | List domains (?type, ?page, ?limit) |
+| GET | `/api/domains/all` | Login | All domains grouped by type |
 | POST | `/api/domains` | Admin+CSRF | Add domain |
 | PUT | `/api/domains/<id>` | Admin+CSRF | Update domain |
 | DELETE | `/api/domains/<id>` | Admin+CSRF | Delete domain |
-| GET | `/api/domains/export` | Admin | Export domains as JSON/CSV/TXT |
-| POST | `/api/domains/import` | Admin+CSRF | Import domains from JSON/CSV/TXT |
+| GET | `/api/domains/export` | Admin | Export as JSON/CSV/TXT |
+| POST | `/api/domains/import` | Admin+CSRF | Import from JSON/CSV/TXT |
 | POST | `/api/domains/<id>/check` | Admin+CSRF | Manual check single domain |
 | POST | `/api/check-all` | Admin+CSRF | Check all domains |
 | GET | `/api/domains/<id>/cert` | Login | Get cert details |
+| GET | `/api/domains/<id>/history` | Login | Get check history |
 
 ### Web Apps
 | Method | Path | Auth | Description |
@@ -63,16 +64,15 @@ Vigil is a self-hosted web application that monitors SSL certificate expiry, dom
 | POST | `/api/webapps` | Admin+CSRF | Add webapp |
 | PUT | `/api/webapps/<id>` | Admin+CSRF | Update webapp |
 | DELETE | `/api/webapps/<id>` | Admin+CSRF | Delete webapp |
-| POST | `/api/webapps/bulk-delete` | Admin+CSRF | Bulk delete webapps |
-| POST | `/api/webapps/bulk-check` | Admin+CSRF | Check selected webapps |
+| POST | `/api/webapps/bulk-delete` | Admin+CSRF | Bulk delete |
+| POST | `/api/webapps/bulk-check` | Admin+CSRF | Check selected |
 | POST | `/api/webapps/<id>/check` | Admin+CSRF | Check single webapp |
 | POST | `/api/webapps/check-all` | Admin+CSRF | Check all webapps |
-| POST | `/api/webapps/batch-sparklines` | Login | Get sparkline data for webapps |
-| GET | `/api/webapps/<id>/results` | Login | Get check results for a webapp |
-| GET | `/api/webapps/<id>/detail` | Login | Get detail/downtime data for a webapp |
-| GET | `/api/webapps/stats` | Login | Get webapp statistics |
-| GET | `/api/webapps/export/csv` | Admin | Export webapps as CSV |
-| POST | `/api/webapps/import` | Admin+CSRF | Import webapps from JSON/CSV/TXT |
+| GET | `/api/webapps/<id>/detail` | Login | Detail/downtime data |
+| GET | `/api/webapps/<id>/results` | Login | Check results |
+| GET | `/api/webapps/stats` | Login | Statistics |
+| GET | `/api/webapps/export/csv` | Admin | Export as CSV |
+| POST | `/api/webapps/import` | Admin+CSRF | Import from JSON/CSV/TXT |
 | GET | `/api/webapps/status/public` | None | Public status page data |
 
 ### Dashboard & Status
@@ -89,11 +89,11 @@ Vigil is a self-hosted web application that monitors SSL certificate expiry, dom
 | PUT | `/api/settings` | Admin+CSRF | Update settings |
 | GET | `/api/settings/export` | Admin | Export settings as JSON |
 | POST | `/api/settings/import` | Admin+CSRF | Import settings from JSON |
-| POST | `/api/settings/test-smtp` | Admin+CSRF | Test SMTP configuration |
+| POST | `/api/settings/test-smtp` | Admin+CSRF | Test SMTP |
 | POST | `/api/settings/test-webhook` | Admin+CSRF | Test webhook |
 | GET | `/api/email-templates` | Admin | Get all email templates |
 | PUT | `/api/email-templates/<name>` | Admin+CSRF | Update template |
-| PUT | `/api/email-templates/reset` | Admin+CSRF | Reset templates to defaults |
+| PUT | `/api/email-templates/reset` | Admin+CSRF | Reset to defaults |
 
 ### Users
 | Method | Path | Auth | Description |
@@ -128,22 +128,24 @@ Vigil is a self-hosted web application that monitors SSL certificate expiry, dom
 | GET | `/api/backups/download/<file>` | Admin | Download backup file |
 | DELETE | `/api/backups/<file>` | Admin+CSRF | Delete backup |
 
+### Prometheus
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/metrics` | None | Prometheus-formatted metrics |
+
 ## Database Schema
 
 ### `domains`
-`id`, `url`, `type` (full/ssl_only), `ssl_expiry`, `ssl_days_left`, `ssl_status`, `ssl_issuer`, `ssl_subject`, `ssl_sans`, `ssl_valid_from`, `ssl_valid_until`, `domain_expiry`, `domain_days_left`, `domain_status`, `domain_registrar`, `status`, `last_checked`, `notes`, `ssl_alert_threshold`, `domain_alert_threshold`, `created_at`, `last_alerted`, `manual_expiry_date`, `manual_registrar`, `tags`, `ssl_fingerprint`, `check_interval`
+`id`, `url`, `type` (full/ssl_only), `ssl_expiry`, `ssl_days_left`, `ssl_status`, `ssl_issuer`, `ssl_subject`, `ssl_sans`, `ssl_valid_from`, `ssl_valid_until`, `ssl_tls_version`, `ssl_cipher`, `ssl_fingerprint`, `ssl_serial`, `ssl_pem`, `domain_expiry`, `domain_days_left`, `domain_status`, `domain_registrar`, `status`, `last_checked`, `notes`, `ssl_alert_threshold`, `domain_alert_threshold`, `created_at`, `last_alerted`, `manual_expiry_date`, `manual_registrar`, `tags`, `check_interval`
 
 ### `webapps`
-`id`, `name`, `url`, `is_active`, `notify_on_down`, `notify_on_recovery`, `response_time_threshold`, `check_interval_seconds`, `status`, `uptime_check_interval`, `last_checked`, `created_at`
+`id`, `name`, `url`, `method`, `expected_status`, `expected_body`, `timeout`, `headers`, `body`, `check_interval`, `status`, `response_time_ms`, `last_status_code`, `last_checked`, `last_error`, `uptime_count`, `downtime_count`, `total_checks`, `successful_checks`, `is_active`, `notify_on_down`, `notify_on_recovery`, `last_alerted`, `notes`, `status_changed_at`, `tags`, `created_at`, `updated_at`
 
 ### `webapp_results`
-`id`, `webapp_id`, `status` (up/down/slow/error), `response_time_ms`, `status_code`, `error_message`, `checked_at`
-
-### `webapp_health_log`
-`id`, `webapp_id`, `date`, `uptime_percent`, `total_checks`, `up_checks`, `slow_checks`, `down_checks`, `avg_response_time_ms`
+`id`, `webapp_id`, `status`, `status_code`, `response_time_ms`, `error`, `checked_at`
 
 ### `settings`
-`id`, `smtp_server`, `smtp_port`, `smtp_email`, `smtp_password` (encrypted), `smtp_enabled`, `ssl_alert_threshold`, `domain_alert_threshold`, `alert_emails`, `slack_webhook_url`, `slack_enabled`, `zulip_webhook_url`, `zulip_enabled`, `last_summary_sent`, `webapp_check_interval_seconds`
+`id`, `smtp_server`, `smtp_port`, `smtp_email`, `smtp_password` (encrypted), `smtp_enabled`, `ssl_alert_threshold`, `domain_alert_threshold`, `alert_emails`, `slack_webhook_url`, `slack_enabled`, `zulip_webhook_url`, `zulip_enabled`, `last_summary_sent`, `backup_schedule_hour`, `backup_schedule_minute`, `max_backups`, `log_retention_days`
 
 ### `users`
 `id`, `username`, `password` (werkzeug hash), `role` (admin/user/viewer), `is_active` (1/0), `login_fails`, `last_fail`, `last_login`, `created_at`
@@ -155,13 +157,19 @@ Vigil is a self-hosted web application that monitors SSL certificate expiry, dom
 `id`, `name`, `key_hash` (SHA256), `key_masked`, `revoked`, `created_at`, `last_used`
 
 ### `logs`
-`id`, `type` (info/check/alert/error/alert_error/webapp_alert_error), `message`, `domain_id`, `username`, `created_at`
+`id`, `type` (info/check/alert/error/alert_error/webapp_alert_error), `message`, `domain_id`, `username`, `client_ip`, `created_at`
 
 ### `health_snapshots`
 `id`, `snapshot_date`, `ssl_healthy`, `ssl_total`, `domain_healthy`, `domain_total`, `created_at`
 
 ### `check_runs`
 `id`, `run_type` (manual/scheduled), `status` (running/completed), `domains_checked`, `domains_total`, `started_at`, `completed_at`
+
+### `check_results`
+`id`, `domain_id`, `checked_at`, `status`, `result_json`, `ssl_days_left`, `domain_days_left`
+
+### `rate_limits`
+`key`, `count`, `window_start`
 
 ## Environment Variables
 
@@ -171,11 +179,12 @@ Vigil is a self-hosted web application that monitors SSL certificate expiry, dom
 | `ENCRYPTION_KEY` | (required) | Fernet key for SMTP password encryption |
 | `FLASK_DEBUG` | `0` | Enable Flask debug mode |
 | `PORT` | `5000` | App listen port |
+| `DB_TYPE` | `sqlite` | Database backend: sqlite or postgresql |
 | `DB_PATH` | `data_volume/ssl_checker.db` | SQLite database path |
 | `BACKUP_DIR` | `backups/` | Backup storage directory |
 | `MAX_BACKUPS` | `30` | Max backup files to retain |
 | `HTTPS` | `1` | Enable Secure cookie flag and HSTS |
-| `SESSION_LIFETIME_HOURS` | `24` | Max session lifetime |
+| `SESSION_LIFETIME_HOURS` | `4` | Max session lifetime |
 | `RATE_LIMIT_DEFAULT` | `200 per day,50 per hour` | API rate limit |
 | `RATE_LIMIT_LOGIN` | `10 per minute` | Login endpoint rate limit |
 | `LOG_MAX_BYTES` | `5242880` | Log rotation size |
@@ -186,12 +195,9 @@ Vigil is a self-hosted web application that monitors SSL certificate expiry, dom
 | `WHOIS_TIMEOUT` | `15` | WHOIS socket timeout |
 | `WHOIS_CACHE_TTL` | `300` | WHOIS cache lifetime |
 | `WHOIS_RECV_TIMEOUT` | `5` | WHOIS recv chunk timeout |
-| `SMTP_HOST` | — | Env override for SMTP server |
-| `SMTP_PORT` | `587` | Env override for SMTP port |
-| `SMTP_SECURE` | `true` | Enable STARTTLS for env SMTP |
-| `SMTP_USER` | — | Env override for SMTP username |
-| `SMTP_PASS` | — | Env override for SMTP password |
-| `RECIPIENT_MAIL` | — | Env override for alert recipients |
+| `DATA_RETENTION_DAYS` | `90` | Old data retention period |
+| `PG_POOL_MIN` | `2` | PostgreSQL pool min connections |
+| `PG_POOL_MAX` | `10` | PostgreSQL pool max connections |
 
 ## Testing
 

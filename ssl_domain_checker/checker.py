@@ -1,6 +1,7 @@
 import atexit
 import collections
 import datetime
+import hashlib
 import ipaddress
 import json
 import logging
@@ -178,7 +179,9 @@ def _check_ssl(url):
     hostname = _parse_hostname(url)
     result = {"ssl_expiry": None, "ssl_days_left": None, "ssl_status": "pending",
               "ssl_issuer": None, "ssl_subject": None, "ssl_sans": None,
-              "ssl_valid_from": None, "ssl_valid_until": None}
+              "ssl_valid_from": None, "ssl_valid_until": None,
+              "ssl_tls_version": None, "ssl_cipher": None,
+              "ssl_fingerprint": None, "ssl_serial": None}
     try:
         # Resolve once to prevent DNS rebinding between private-IP check and connection
         resolved = _resolve_hostname(hostname)
@@ -200,9 +203,18 @@ def _check_ssl(url):
         if sock is None:
             raise ValueError("Could not connect to any resolved address")
         with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+            result["ssl_tls_version"] = ssock.version()
+            cipher = ssock.cipher()
+            if cipher:
+                result["ssl_cipher"] = cipher[0]
             cert = ssock.getpeercert()
+            cert_binary = ssock.getpeercert(binary_form=True)
+            if cert_binary:
+                result["ssl_fingerprint"] = hashlib.sha256(cert_binary).hexdigest()
+                result["ssl_pem"] = ssl.DER_cert_to_PEM_cert(cert_binary)
         if not cert:
             return result
+        result["ssl_serial"] = cert.get("serialNumber")
         expires = datetime.datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y %Z")
         now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         days_left = (expires - now).days

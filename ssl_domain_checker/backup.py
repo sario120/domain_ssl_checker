@@ -199,17 +199,19 @@ def _export_pg_json(backup_path, notes=None):
 
 
 def get_db_info():
+    backups = list_backups()
     info = {
         'type': db.DB_TYPE,
         'size': None,
         'domain_count': None,
         'webapp_count': None,
-        'backup_count': len(list_backups()),
+        'backup_count': len(backups),
         'max_backups': MAX_BACKUPS,
         'backup_dir': BACKUP_DIR,
         'schedule_hour': 3,
         'schedule_minute': 0,
         'next_backup_at': None,
+        'last_backup_at': backups[0]['created'] if backups else None,
     }
     try:
         from scheduler import scheduler as _sched

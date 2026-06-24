@@ -1,6 +1,6 @@
 // ─── State ──────────────────────────────────────────────────────
 let activeView = 'dashboard';
-let logState = { page: 1, limit: 10, total: 0, filter: 'all', query: '' };
+let logState = { page: 1, limit: 10, total: 0, filter: 'all', query: '', from_date: '', to_date: '', exclude: false };
 let selectedDomains = new Set();
 let selectedSsl = new Set();
 let _csrfToken = null;
@@ -21,6 +21,10 @@ let _keyboardFocusIndex = -1;
 let _userRole = 'admin'; // default admin until session check completes
 let _settingsDirty = false;
 let _settingsOriginal = {};
+let _securityDirty = false;
+let _securityOriginal = {};
+let _emailTplDirty = false;
+let _emailTplOriginal = {};
 let _usersLoaded = false;
 let _usersCache = [];
 let _currentUsername = '';
@@ -57,9 +61,9 @@ function activateView(viewName) {
     viewName = 'dashboard';
     window.location.hash = 'dashboard';
   }
-  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.sidebar-item').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  const tab = document.querySelector(`.nav-tab[data-view="${viewName}"]`);
+  const tab = document.querySelector(`.sidebar-item[data-view="${viewName}"]`);
   if (tab) tab.classList.add('active');
   const view = document.getElementById('view-' + viewName);
   if (view) view.classList.add('active');
@@ -73,9 +77,14 @@ function activateView(viewName) {
   if (viewName === 'webapps') { loadWebappViewPrefs(); loadWebApps(true); }
 }
 
-document.querySelectorAll('.nav-tab').forEach(tab => {
+document.querySelectorAll('.sidebar-item').forEach(tab => {
   tab.addEventListener('click', () => {
     window.location.hash = tab.dataset.view;
+    var sidebar = document.getElementById('sidebar');
+    if (sidebar && sidebar.classList.contains('open')) {
+      sidebar.classList.remove('open');
+      document.getElementById('sidebar-overlay').classList.remove('visible');
+    }
   });
 });
 
@@ -83,6 +92,15 @@ window.addEventListener('hashchange', () => {
   const viewName = window.location.hash.slice(1) || 'dashboard';
   activateView(viewName);
 });
+
+(function restoreSidebarState() {
+  if (window.innerWidth >= 769) {
+    var s = document.getElementById('sidebar');
+    if (s && localStorage.getItem('vigil_sidebar_collapsed') === '1') {
+      s.classList.add('collapsed');
+    }
+  }
+})();
 
 // ─── Global event delegation for data-action ──────────────────
 document.addEventListener('click', (e) => {
@@ -106,8 +124,44 @@ document.addEventListener('click', (e) => {
   else if (action === 'clear-user-filters') clearUserFilters();
   else if (action === 'toggle-user-active') toggleUserActive(parseInt(btn.dataset.id), btn.dataset.name, btn.dataset.active === '1');
   else if (action === 'refresh-logs') refreshLogs();
+  else if (action === 'clear-logs') {
+    if (!confirm('Delete ALL activity logs? This cannot be undone.')) return;
+    (async () => {
+      try {
+        const cr = await fetch('/api/csrf-token');
+        const token = cr.ok ? (await cr.json()).csrf_token : null;
+        const res = await fetch('/api/logs/clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(token ? { 'X-CSRF-Token': token } : {}) }
+        });
+        if (!res.ok) { let d; try { d = await res.json(); } catch {}; throw new Error((d && d.error) || 'Clear failed'); }
+        if (res.headers.get('X-CSRF-Token')) _csrfToken = res.headers.get('X-CSRF-Token');
+        refreshLogs();
+        toast('All logs cleared');
+      } catch (e) { toast(e.message, 'error'); }
+    })();
+  }
+  else if (action === 'clear-log-dates') {
+    logState.from_date = '';
+    logState.to_date = '';
+    logState.page = 1;
+    document.getElementById('log-from-date').value = '';
+    document.getElementById('log-to-date').value = '';
+    refreshLogs();
+  }
   else if (action === 'log-prev') logPage(-1);
   else if (action === 'log-next') logPage(1);
+  else if (action === 'log-jump') {
+    const input = document.getElementById('log-page-jump-input');
+    let page = parseInt(input.value);
+    const totalPages = Math.max(1, Math.ceil(logState.total / logState.limit));
+    if (isNaN(page) || page < 1) page = 1;
+    if (page > totalPages) page = totalPages;
+    if (page !== logState.page) {
+      logState.page = page;
+      refreshLogs();
+    }
+  }
   else if (action === 'close-domain-modal') closeDomainModal();
   else if (action === 'close-user-modal') closeUserModal();
   else if (action === 'close-confirm-modal') closeConfirmModal();
@@ -120,6 +174,7 @@ document.addEventListener('click', (e) => {
   else if (action === 'edit-user') openEditUserModal(parseInt(btn.dataset.id), btn.dataset.name, btn.dataset.role);
   else if (action === 'delete-user') confirmDelete(parseInt(btn.dataset.id), btn.dataset.name, 'user');
   else if (action === 'view-cert') openCertModal(parseInt(btn.dataset.id));
+  else if (action === 'cert-check-now') { const b = document.getElementById('cert-check-now-btn'); b.disabled = true; b.textContent = '\u231B Checking...'; manualCheck(_lastCertId); setTimeout(function() { b.disabled = false; b.textContent = '\u21bb Check Now'; }, 5000); }
   else if (action === 'bulk-check') bulkAction('full', 'check');
   else if (action === 'bulk-delete') bulkAction('full', 'delete');
   else if (action === 'bulk-deselect') deselectAll('full');
@@ -157,8 +212,29 @@ document.addEventListener('click', (e) => {
   else if (action === 'page-next-ssl') goToPage('ssl_only', _pagination.ssl_only.page + 1);
   else if (action === 'page-last-ssl') goToPage('ssl_only', totalPages('ssl_only'));
   else if (action === 'filter-domains') filterDomainsFromDash(btn.dataset.type, btn.dataset.status);
+  else if (action === 'filter-webapps') { e.stopPropagation(); filterWebappsFromDash(btn.dataset.webappFilter); }
   else if (action === 'back-to-top') window.scrollTo({ top: 0, behavior: 'smooth' });
   else if (action === 'go-dashboard') { window.location.hash = 'dashboard'; activateView('dashboard'); }
+  else if (action === 'toggle-sidebar') {
+    var sidebar = document.getElementById('sidebar');
+    var overlay = document.getElementById('sidebar-overlay');
+    if (sidebar) {
+      var open = sidebar.classList.toggle('open');
+      if (overlay) overlay.classList.toggle('visible', open);
+    }
+  }
+  else if (action === 'close-sidebar') {
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebar-overlay').classList.remove('visible');
+  }
+  else if (action === 'toggle-sidebar-collapse') {
+    var s = document.getElementById('sidebar');
+    if (s) {
+      s.classList.add('transition');
+      s.classList.toggle('collapsed');
+      try { localStorage.setItem('vigil_sidebar_collapsed', s.classList.contains('collapsed') ? '1' : ''); } catch(e) {}
+    }
+  }
   else if (action === 'go-webapps') { window.location.hash = 'webapps'; activateView('webapps'); }
   else if (action === 'go-domain') openDomainInNewTab(parseInt(btn.dataset.id));
   else if (action === 'quick-check') { e.stopPropagation(); quickCheck(parseInt(btn.dataset.id)); }
@@ -218,18 +294,20 @@ document.addEventListener('click', (e) => {
     saveWebappViewPrefs();
   }
   else if (action === 'check-all-webapps') {
-    api('POST', '/api/webapps/check-all').then(function () { loadWebApps(true); toast('All web apps checked'); }).catch(function (e) { toast(e.message, 'error'); });
+    var checkAllBtn = btn;
+    setLoading(checkAllBtn, true);
+    api('POST', '/api/webapps/check-all').then(function () { loadWebApps(true); toast('All web apps checked'); }).catch(function (e) { toast(e.message, 'error'); }).finally(function () { setLoading(checkAllBtn, false); });
   }
   else if (action === 'webapp-check-now') {
     var wid = parseInt(btn.dataset.id);
-    var oldStatus = (_webappsCache || []).find(function (a) { return a.id === wid; });
+    setLoading(btn, true);
     api('POST', '/api/webapps/' + wid + '/check').then(function () {
       loadWebApps(true);
       setTimeout(function () {
         var card = document.querySelector('[data-webapp-id="' + wid + '"]');
         if (card) { card.classList.add('status-changed'); setTimeout(function () { card.classList.remove('status-changed'); }, 1000); }
       }, 100);
-    }).catch(function (e) { toast(e.message, 'error'); });
+    }).catch(function (e) { toast(e.message, 'error'); }).finally(function () { setLoading(btn, false); });
   }
   else if (action === 'webapp-edit') {
     var wid = parseInt(btn.dataset.id);
@@ -323,6 +401,9 @@ document.addEventListener('click', (e) => {
   else if (action === 'webapp-export-csv') {
     window.open('/api/webapps/export/csv', '_blank');
   }
+  else if (action === 'webapp-export-json') {
+    window.open('/api/webapps/export/json', '_blank');
+  }
   else if (action === 'webapp-toggle-active') {
     var wid = parseInt(btn.dataset.id);
     var app = (_webappsCache || []).find(function (a) { return a.id === wid; });
@@ -340,6 +421,9 @@ document.addEventListener('click', (e) => {
   }
   else if (action === 'close-webapp-detail') {
     document.getElementById('webapp-detail-modal').classList.remove('open');
+    var tooltip = document.getElementById('chart-tooltip');
+    if (tooltip) tooltip.style.display = 'none';
+    if (_detailEscapeHandler) { document.removeEventListener('keydown', _detailEscapeHandler); _detailEscapeHandler = null; }
   }
 
   else if (action === 'clear-webapp-filters') {
@@ -349,6 +433,11 @@ document.addEventListener('click', (e) => {
     var allBtn = document.querySelector('#webapp-filters [data-webapp-filter="all"]');
     if (allBtn) allBtn.classList.add('active');
     applyWebAppFilters(_webappsCache || []);
+  }
+  else if (action === 'dash-show-more-expiry') {
+    var tab = btn.dataset.tab;
+    if (tab === 'ssl') { window.location.hash = 'sslcerts'; activateView('sslcerts'); }
+    else { window.location.hash = 'domains'; activateView('domains'); }
   }
 });
 
@@ -484,6 +573,29 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// ─── Cert modal copy button ─────────────────────────────────────
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.cert-copy-btn[data-copy]');
+  if (btn) {
+    e.stopPropagation();
+    copyToClipboard(btn.dataset.copy, btn);
+    return;
+  }
+});
+
+// ─── Cert modal PEM toggle via click ────────────────────────────
+document.addEventListener('click', (e) => {
+  const toggle = e.target.closest('.cert-pem-toggle');
+  if (toggle) {
+    const block = document.getElementById('cert-pem-block');
+    if (block) {
+      block.classList.toggle('open');
+      toggle.innerHTML = block.classList.contains('open') ? '&#9660; Hide PEM' : '&#9654; Show PEM';
+    }
+    return;
+  }
+});
+
 // ─── Dropdown keyboard navigation ─────────────────────────────
 document.addEventListener('keydown', function (e) {
   var openDropdown = document.querySelector('.kebab-dropdown[style*="display: block"], .actions-dropdown-content[style*="display: block"]');
@@ -603,11 +715,27 @@ document.addEventListener('scroll', () => {
 // ─── Auto-refresh ─────────────────────────────────────────────────
 document.getElementById('auto-refresh-select').addEventListener('change', (e) => {
   _autoRefresh = parseInt(e.target.value);
+  try { localStorage.setItem('vigil-auto-refresh', String(_autoRefresh)); } catch(ex) {}
   clearInterval(_autoRefreshTimer);
   if (_autoRefresh > 0 && activeView === 'dashboard') {
     _autoRefreshTimer = setInterval(() => loadDashboard(true), _autoRefresh * 1000);
   }
 });
+
+// Dashboard search (Enter to navigate)
+var dashSearchEl = document.getElementById('dash-search');
+if (dashSearchEl) {
+  dashSearchEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      var q = dashSearchEl.value.trim();
+      if (!q) return;
+      window.location.hash = 'domains';
+      activateView('domains');
+      var domainSearch = document.getElementById('domain-search');
+      if (domainSearch) { domainSearch.value = q; domainSearch.dispatchEvent(new Event('input')); }
+    }
+  });
+}
 
 var _relTimeTimer = null;
 function refreshRelTimes() {
@@ -904,8 +1032,16 @@ document.addEventListener('change', (e) => {
 document.addEventListener('click', (e) => {
   const chip = e.target.closest('#log-filters .log-filter[data-log-filter]');
   if (!chip) return;
-  document.querySelectorAll('#log-filters .log-filter').forEach(c => c.classList.remove('active'));
-  chip.classList.add('active');
+  if (logState.exclude) {
+    chip.classList.toggle('active');
+    chip.classList.toggle('active-exclude');
+  } else {
+    document.querySelectorAll('#log-filters .log-filter').forEach(c => {
+      c.classList.remove('active');
+      c.classList.remove('active-exclude');
+    });
+    chip.classList.add('active');
+  }
   logState.filter = chip.dataset.logFilter;
   logState.page = 1;
   refreshLogs();
@@ -923,6 +1059,52 @@ document.getElementById('log-search').addEventListener('input', (e) => {
   logState.page = 1;
   clearTimeout(_logSearchTimer);
   _logSearchTimer = setTimeout(() => refreshLogs(), 250);
+});
+
+document.getElementById('log-from-date').addEventListener('change', (e) => {
+  logState.from_date = e.target.value;
+  logState.page = 1;
+  refreshLogs();
+});
+document.getElementById('log-to-date').addEventListener('change', (e) => {
+  logState.to_date = e.target.value;
+  logState.page = 1;
+  refreshLogs();
+});
+
+document.getElementById('log-from-date').addEventListener('click', function () { this.showPicker(); });
+document.getElementById('log-to-date').addEventListener('click', function () { this.showPicker(); });
+
+document.getElementById('log-page-jump-input').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') {
+    const totalPages = Math.max(1, Math.ceil(logState.total / logState.limit));
+    let page = parseInt(this.value);
+    if (isNaN(page) || page < 1) page = 1;
+    if (page > totalPages) page = totalPages;
+    if (page !== logState.page) {
+      logState.page = page;
+      refreshLogs();
+    }
+  }
+});
+
+document.getElementById('log-exclude-toggle').addEventListener('click', function () {
+  logState.exclude = !logState.exclude;
+  this.classList.toggle('active', logState.exclude);
+  this.textContent = logState.exclude ? '⊖' : '⊕';
+  if (!logState.exclude) {
+    document.querySelectorAll('#log-filters .log-filter').forEach(c => {
+      c.classList.remove('active-exclude');
+      const isActive = c.dataset.logFilter === logState.filter;
+      c.classList.toggle('active', isActive);
+    });
+  } else {
+    document.querySelectorAll('#log-filters .log-filter').forEach(c => {
+      c.classList.remove('active');
+    });
+  }
+  logState.page = 1;
+  refreshLogs();
 });
 
 // ─── Domain filter chips ─────────────────────────────────────────
@@ -1028,8 +1210,14 @@ async function api(method, path, body) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  if (method !== 'GET' && _csrfToken) {
-    opts.headers['X-CSRF-Token'] = _csrfToken;
+  if (method !== 'GET') {
+    if (!_csrfToken) {
+      try {
+        const r = await fetch('/api/csrf-token');
+        if (r.ok) _csrfToken = (await r.json()).csrf_token;
+      } catch {}
+    }
+    if (_csrfToken) opts.headers['X-CSRF-Token'] = _csrfToken;
   }
   const res = await fetch(path, opts);
   const newToken = res.headers.get('X-CSRF-Token');
@@ -1038,8 +1226,12 @@ async function api(method, path, body) {
     window.location.href = '/';
     return;
   }
+  if (!res.ok) {
+    let errMsg = 'Request failed';
+    try { const d = await res.json(); errMsg = d.error || errMsg; } catch {}
+    throw new Error(errMsg);
+  }
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Request failed');
   return data;
 }
 
@@ -1085,7 +1277,7 @@ function formatDate(dateStr) {
   if (!p) return dateStr;
   var hh = p.hour.toString().padStart(2, '0');
   var mm = p.min.toString().padStart(2, '0');
-  return (p.month + 1) + '/' + p.day + '/' + p.year + ' ' + hh + ':' + mm;
+  return (p.month + 1) + '/' + p.day + '/' + p.year + ' ' + hh + ':' + mm + ' ' + _timezoneLabel;
 }
 
 function relativeTime(dateStr) {
@@ -1177,7 +1369,15 @@ async function loadDashboard(force = false) {
 
 function updateLastRefreshed() {
   const el = document.getElementById('last-refreshed');
-  if (el) el.textContent = `Last refreshed: ${new Date().toLocaleTimeString()}`;
+  if (!el) return;
+  var now = new Date();
+  var m = now.getMonth() + 1;
+  var d = now.getDate();
+  var y = now.getFullYear();
+  var hh = now.getHours().toString().padStart(2, '0');
+  var mm = now.getMinutes().toString().padStart(2, '0');
+  var ss = now.getSeconds().toString().padStart(2, '0');
+  el.textContent = 'Last refreshed: ' + m + '/' + d + '/' + y + ' ' + hh + ':' + mm + ':' + ss + ' ' + _timezoneLabel;
 }
 
 function openQuickAddModal() {
@@ -1210,7 +1410,7 @@ document.getElementById('quickadd-form').addEventListener('submit', function (e)
 });
 
 function renderDashboardSummary(summary, sched) {
-  const { full_stats: fStats, ssl_stats: sStats, full_count, ssl_count, reachable, total, ssl_expiring, domain_expiring, expiry_buckets, last_check, webapp_stats, webapp_failures } = summary;
+  const { full_stats: fStats, ssl_stats: sStats, full_count, ssl_count, reachable, total, ssl_expiring, domain_expiring, expiry_buckets, last_check, webapp_stats, webapp_failures, webapp_trend, webapp_uptime_24h, webapp_avg_response_time } = summary;
   const wStats = webapp_stats || { up: 0, down: 0, slow: 0, unknown: 0, total: 0, paused: 0 };
 
   document.getElementById('dash-counts').textContent = `${full_count} domains + ${ssl_count} SSL`;
@@ -1241,7 +1441,7 @@ function renderDashboardSummary(summary, sched) {
     const parts = [];
     if (dDiff !== 0) parts.push(`Domain health <span class="${dDiff > 0 ? 'chg-up' : 'chg-down'}">${dDiff > 0 ? '+' : ''}${dDiff}%</span>`);
     if (sDiff !== 0) parts.push(`SSL health <span class="${sDiff > 0 ? 'chg-up' : 'chg-down'}">${sDiff > 0 ? '+' : ''}${sDiff}%</span>`);
-    if (wDiff !== 0) parts.push(`API health <span class="${wDiff > 0 ? 'chg-up' : 'chg-down'}">${wDiff > 0 ? '+' : ''}${wDiff}%</span>`);
+    if (wDiff !== 0) parts.push(`Webapp health <span class="${wDiff > 0 ? 'chg-up' : 'chg-down'}">${wDiff > 0 ? '+' : ''}${wDiff}%</span>`);
     const el = document.getElementById('dash-changed');
     if (parts.length > 0) { el.innerHTML = 'Since last check: ' + parts.join(', '); el.classList.add('visible'); }
     else { el.classList.remove('visible'); }
@@ -1269,9 +1469,61 @@ function renderDashboardSummary(summary, sched) {
   animStat('dash-webapp-unknown', wStats.unknown);
   animStat('dash-webapp-paused', wStats.paused);
 
-  const issueCount = fStats.expired + fStats.error + sStats.expired + sStats.error + wStats.down + wStats.slow;
+  // Avg response time
+  var rtEl = document.getElementById('dash-webapp-rt-row');
+  if (webapp_avg_response_time != null) {
+    document.getElementById('dash-webapp-avg-rt').textContent = webapp_avg_response_time + 'ms';
+    rtEl.style.display = '';
+  } else {
+    rtEl.style.display = 'none';
+  }
+
+  // Card border color based on worst status
+  var webappCard = document.getElementById('dash-webapp-card');
+  var worst = wStats.down > 0 ? 'danger' : wStats.slow > 0 ? 'warning' : (wStats.total > 0 ? 'healthy' : '');
+  webappCard.className = 'dash-card' + (worst ? ' dash-card-worst-' + worst : '');
+
+  // Sparkline
+  var spEl = document.getElementById('dash-webapp-sparkline');
+  if (webapp_trend && webapp_trend.length > 1) {
+    spEl.innerHTML = renderSparklineSvg(webapp_trend, 180, 28);
+    spEl.style.display = '';
+  } else {
+    spEl.style.display = 'none';
+  }
+
+  // Sidebar uptime
+  var uptimeEl = document.getElementById('wa-sidebar-uptime');
+  uptimeEl.textContent = webapp_uptime_24h != null ? webapp_uptime_24h + '% uptime (24h)' : '';
+
+  const fIssues = fStats.expired + fStats.error;
+  const sIssues = sStats.expired + sStats.error;
+  const wIssues = wStats.down + wStats.slow;
+  const issueCount = fIssues + sIssues + wIssues;
   document.getElementById('hero-issue-count').textContent = issueCount;
+  var breakdownEl = document.getElementById('hero-issue-breakdown');
+  var parts = [];
+  if (fIssues) parts.push('D:' + fIssues);
+  if (sIssues) parts.push('SSL:' + sIssues);
+  if (wIssues) parts.push('WA:' + wIssues);
+  breakdownEl.textContent = parts.join(' | ');
   document.getElementById('hero-next-check').textContent = sched && sched.next_run ? formatCountdownText(sched.next_run) : 'Not scheduled';
+
+  // Check duration
+  var durItem = document.getElementById('hero-check-duration-item');
+  var durEl = document.getElementById('hero-check-duration');
+  if (last_check && last_check.duration_seconds != null) {
+    var d = last_check.duration_seconds;
+    var durStr = d >= 60 ? Math.round(d / 60) + 'm ' + (d % 60) + 's' : d + 's';
+    durEl.textContent = durStr;
+    durItem.style.display = '';
+  } else {
+    durItem.style.display = 'none';
+  }
+
+  // Show search bar when data exists
+  var searchInput = document.getElementById('dash-search');
+  if (searchInput) searchInput.style.display = hasData ? '' : 'none';
 
   renderSchedulerStatus(sched, last_check);
   renderExpiringList('ssl-expiring-list', ssl_expiring);
@@ -1301,7 +1553,7 @@ function renderSystemInfo(info) {
     { label: 'System', rows: [
       { icon: '&#x1F4CB;', key: 'Version', val: escHtml(info.version) },
       { icon: '&#x23F1;', key: 'Uptime', val: formatUptime(info.uptime_seconds) },
-      { icon: '&#x1F4C5;', key: 'Started', val: info.app_started_at },
+      { icon: '&#x1F4C5;', key: 'Started', val: formatDate(info.app_started_at) },
       { icon: '&#x1F504;', key: 'API resp', val: info.api_response_time_ms + 'ms' },
     ]},
     { label: 'Scheduler', rows: [
@@ -1320,18 +1572,35 @@ function renderSystemInfo(info) {
 function renderWebappFailures(failures) {
   var el = document.getElementById('webapp-failures-list');
   if (!el) return;
+  var badge = document.getElementById('wa-failure-count');
   if (!failures || failures.length === 0) {
     el.innerHTML = '<div class="top-empty">No recent failures</div>';
+    if (badge) badge.textContent = '';
     return;
   }
+  if (badge) badge.textContent = '(' + failures.length + ')';
   el.innerHTML = failures.map(function (w) {
     var status = (w.status || 'unknown').toLowerCase();
     var cls = status === 'down' ? 'expired' : 'warning';
     return '<div class="top-item ' + cls + '" data-action="webapp-detail" data-id="' + w.id + '">' +
-      '<div class="top-left"><a class="top-url" href="' + escUrl(w.url) + '" target="_blank" rel="noopener">' + escHtml(w.name || w.url) + '</a><span class="top-tag ssl">' + status.toUpperCase() + '</span></div>' +
+      '<div class="top-left"><a class="top-url" href="' + escUrl(w.url) + '" target="_blank" rel="noopener">' + escHtml(w.name || w.url) + '</a><span class="top-tag webapp" data-action="filter-webapps" data-webapp-filter="' + status + '">' + status.toUpperCase() + '</span></div>' +
       '<div class="top-right"><span class="top-days">' + (w.last_checked ? relativeTime(w.last_checked) : 'never') + '</span></div>' +
       '</div>';
   }).join('');
+}
+
+function renderSparklineSvg(data, width, height) {
+  var max = Math.max.apply(null, data);
+  if (max === 0) max = 100;
+  var stepX = width / (data.length - 1);
+  var points = data.map(function (v, i) { return (i * stepX).toFixed(1) + ',' + (height - (v / max) * height).toFixed(1); });
+  var polyline = points.join(' ');
+  var areaPoints = '0,' + height + ' ' + polyline + ' ' + (width) + ',' + height;
+  return '<svg width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '" class="sparkline-svg">' +
+    '<defs><linearGradient id="spark-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--primary)" stop-opacity="0.3"/><stop offset="100%" stop-color="var(--primary)" stop-opacity="0.02"/></linearGradient></defs>' +
+    '<polygon points="' + areaPoints + '" fill="url(#spark-fill)"/>' +
+    '<polyline points="' + polyline + '" fill="none" stroke="var(--primary)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '</svg>';
 }
 
 // ─── Web Apps ──────────────────────────────────────────────────
@@ -1369,6 +1638,8 @@ function loadWebappViewPrefs() {
     if (p.pageSize) _webappPagination.size = p.pageSize;
     if (p.cols) _webappVisibleCols = p.cols;
     if (p.collapsedGroups) _webappCollapsedGroups = new Set(p.collapsedGroups);
+    var pageSizeSelect = document.getElementById('page-size-webapp');
+    if (pageSizeSelect) pageSizeSelect.value = String(_webappPagination.size);
   } catch (e) {}
 }
 
@@ -1412,7 +1683,10 @@ function formatDurationCompact(h, m, d, hr) {
 
 var _detailWebappId = null;
 var _detailChartHours = 24;
+var _detailChartCache = {};
+var _detailEscapeHandler = null;
 var _timezoneOffsetH = -new Date().getTimezoneOffset() / 60;
+var _timezoneLabel = 'UTC' + (_timezoneOffsetH >= 0 ? '+' : '') + _timezoneOffsetH;
 
 document.getElementById('chart-duration-bar') && document.getElementById('chart-duration-bar').addEventListener('click', function (e) {
   var btn = e.target.closest('[data-hours]');
@@ -1425,7 +1699,7 @@ function loadWebappChart() {
   var waId = _detailWebappId;
   if (!waId) return;
   var chartEl = document.getElementById('detail-wa-chart');
-  chartEl.innerHTML = 'Loading...';
+  chartEl.innerHTML = '<span class="detail-loading">Loading...</span>';
   document.getElementById('detail-wa-avg-rt').textContent = '—';
   document.getElementById('detail-wa-min-rt').textContent = '—';
   document.getElementById('detail-wa-max-rt').textContent = '—';
@@ -1435,7 +1709,12 @@ function loadWebappChart() {
     b.classList.toggle('active', parseInt(b.dataset.hours) === _detailChartHours);
   });
 
-  api('GET', '/api/webapps/' + waId + '/results?hours=' + _detailChartHours).then(function (data) {
+  var cacheKey = waId + '_' + _detailChartHours;
+  var cached = _detailChartCache[cacheKey];
+  var dataPromise = cached ? Promise.resolve(cached) : api('GET', '/api/webapps/' + waId + '/results?hours=' + _detailChartHours);
+
+  dataPromise.then(function (data) {
+    if (!cached) _detailChartCache[cacheKey] = data;
     var withRt = data.filter(function (d) { return d.response_time_ms != null; });
     var rts = withRt.map(function (d) { return d.response_time_ms; });
     if (rts.length < 2) {
@@ -1454,8 +1733,8 @@ function loadWebappChart() {
     var h = 116;
     var max = Math.max.apply(null, rts);
     var min = Math.min.apply(null, rts);
-    if (min === max) { min = 0; }
-    var range = max - min || 1;
+    var range = max - min;
+    if (range === 0) { range = max || 1; min = 0; max = max || 1; }
     var color = getComputedStyle(document.body).getPropertyValue('--primary').trim() || '#3b82f6';
     var areaColor = color + '22';
     var muted = getComputedStyle(document.body).getPropertyValue('--text-muted').trim() || '#888';
@@ -1469,6 +1748,7 @@ function loadWebappChart() {
     var areaPts = '0,' + h + ' ' + pts + ' ' + w + ',' + h;
 
     function niceMax(val) {
+      if (val <= 0) return 100;
       var mag = Math.pow(10, Math.floor(Math.log10(val)));
       var norm = val / mag;
       if (norm <= 1) return mag;
@@ -1547,10 +1827,9 @@ function loadWebappChart() {
       if (!tooltip) {
         tooltip = document.createElement('div');
         tooltip.id = 'chart-tooltip';
-        tooltip.style.cssText = 'position:fixed;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:11px;pointer-events:none;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.2);display:none;line-height:1.5';
+        tooltip.className = 'chart-tooltip';
         document.body.appendChild(tooltip);
       }
-      var rect = chartEl.getBoundingClientRect();
       overlay.addEventListener('mousemove', function (e) {
         var chartRect = chartEl.getBoundingClientRect();
         var mx = e.clientX - chartRect.left - margin.left;
@@ -1571,8 +1850,7 @@ function loadWebappChart() {
           var hh12 = localPt.hour % 12 || 12;
           var ampm = localPt.hour < 12 ? 'AM' : 'PM';
           var mmS = localPt.min.toString().padStart(2, '0');
-          var tzLabel = 'UTC' + (_timezoneOffsetH >= 0 ? '+' : '') + _timezoneOffsetH;
-          timeStr = monName + ' ' + localPt.day + ', ' + localPt.year + ', ' + hh12 + ':' + mmS + ' ' + ampm + ' ' + tzLabel;
+          timeStr = monName + ' ' + localPt.day + ', ' + localPt.year + ', ' + hh12 + ':' + mmS + ' ' + ampm + ' ' + _timezoneLabel;
         }
         tooltip.innerHTML = '<div>' + timeStr + '</div><div style="font-weight:600;color:' + color + '">' + pt.response_time_ms + ' ms</div>';
         tooltip.style.display = '';
@@ -1596,34 +1874,47 @@ function loadWebappChart() {
 
 function openWebAppDetail(wa) {
   _detailWebappId = wa.id;
+  _detailChartCache = {};
   var modal = document.getElementById('webapp-detail-modal');
   document.getElementById('webapp-detail-title').textContent = wa.name || wa.url;
   document.getElementById('detail-wa-url').textContent = wa.url || '';
 
   var status = wa.status || 'unknown';
   var isUp = status === 'up' || status === 'slow';
+  var isPaused = wa.is_active === 0 || wa.is_active === false;
   var badge = document.getElementById('detail-wa-status-badge');
-  badge.textContent = status.toUpperCase();
+  badge.textContent = status.toUpperCase() + (isPaused ? ' (PAUSED)' : '');
   badge.className = 'wa-detail-status-badge ' + (isUp ? 'status-up' : status === 'slow' ? 'status-slow' : 'status-down');
 
   var interval = wa.check_interval || 300;
   document.getElementById('detail-wa-interval').textContent = interval >= 3600 ? Math.round(interval / 3600) + 'h' : interval >= 60 ? Math.round(interval / 60) + 'm' : interval + 's';
   document.getElementById('detail-wa-last-checked-ago').textContent = wa.last_checked ? relativeTime(wa.last_checked) : 'Never';
 
+  // Status code
+  document.getElementById('detail-wa-status-code').textContent = wa.last_status_code || '—';
+
+  // Set loading state
   var durationEl = document.getElementById('detail-wa-current-duration');
-  durationEl.textContent = 'Loading...';
+  durationEl.innerHTML = '<span class="detail-loading">Loading...</span>';
   var chartEl = document.getElementById('detail-wa-chart');
-  chartEl.innerHTML = 'Loading...';
+  chartEl.innerHTML = '<span class="detail-loading">Loading...</span>';
   var incidentsEl = document.getElementById('detail-wa-incidents');
   incidentsEl.innerHTML = '';
+
+  // Detail sparkline loading state
+  document.getElementById('detail-wa-sparkline').innerHTML = '<span class="detail-loading">Loading...</span>';
 
   api('GET', '/api/webapps/' + wa.id + '/detail').then(function (resp) {
     var stats = resp.stats;
     var webapp = resp.webapp;
 
-    durationEl.textContent = isUp
-      ? 'Up for ' + formatDurationLong(stats.current_duration_seconds)
-      : (stats.current_duration_seconds != null ? 'Down for ' + formatDurationLong(stats.current_duration_seconds) : '');
+    if (isPaused || (status !== 'up' && status !== 'down' && status !== 'slow')) {
+      durationEl.textContent = '—';
+    } else if (isUp) {
+      durationEl.textContent = stats.current_duration_seconds != null ? 'Up for ' + formatDurationLong(stats.current_duration_seconds) : '';
+    } else {
+      durationEl.textContent = stats.current_duration_seconds != null ? 'Down for ' + formatDurationLong(stats.current_duration_seconds) : '';
+    }
 
     var recentEl = document.getElementById('detail-wa-recent-checks');
     if (recentEl && stats.recent_checks_total != null) {
@@ -1635,7 +1926,12 @@ function openWebAppDetail(wa) {
       var incidents = stats.uptime[period].incidents;
       var downMin = stats.uptime[period].downtime_minutes;
       document.getElementById('uptime-' + period + '-pct').textContent = pct != null ? pct + '%' : '—';
-      document.getElementById('uptime-' + period + '-bar').style.width = (pct != null ? pct : 0) + '%';
+      var bar = document.getElementById('uptime-' + period + '-bar');
+      bar.style.width = (pct != null ? pct : 0) + '%';
+      bar.className = 'uptime-bar';
+      if (pct != null) {
+        bar.classList.add(pct >= 99 ? 'uptime-bar-good' : pct >= 95 ? 'uptime-bar-ok' : 'uptime-bar-bad');
+      }
       document.getElementById('uptime-' + period + '-incidents').textContent = (incidents || 0);
       document.getElementById('uptime-' + period + '-down').textContent = (downMin || 0);
     }
@@ -1651,7 +1947,7 @@ function openWebAppDetail(wa) {
         return '<div class="incident-row">' +
           '<span class="incident-icon ' + cls + '">' + icon + '</span>' +
           '<span class="incident-dir">' + inc.from.toUpperCase() + ' &rarr; ' + inc.to.toUpperCase() + '</span>' +
-          '<span class="incident-time">' + relativeTime(inc.at) + '</span>' +
+          '<span class="incident-time" title="' + escHtml(formatDate(inc.at)) + '">' + relativeTime(inc.at) + '</span>' +
           '</div>';
       }).join('');
     } else {
@@ -1667,6 +1963,16 @@ function openWebAppDetail(wa) {
   loadWebappDetailSparkline(wa.id);
 
   modal.classList.add('open');
+
+  // Escape key handler
+  if (_detailEscapeHandler) document.removeEventListener('keydown', _detailEscapeHandler);
+  _detailEscapeHandler = function (e) {
+    if (e.key === 'Escape') {
+      var btn = document.querySelector('[data-action="close-webapp-detail"]');
+      if (btn) btn.click();
+    }
+  };
+  setTimeout(function () { document.addEventListener('keydown', _detailEscapeHandler); }, 0);
 }
 
 function showWebappSkeleton(show) {
@@ -2000,27 +2306,27 @@ let _countdownInterval = null;
 function renderSchedulerStatus(sched, lastCheck) {
   const el = document.getElementById('scheduler-text');
   const dot = document.getElementById('scheduler-dot');
-  let text = '';
+  var blocks = [];
   if (sched && (sched.next_run || sched.webapp_interval_seconds)) {
     const parts = [];
     if (sched.domain_interval_hours) {
-      parts.push(`domains: every ${sched.domain_interval_hours}h`);
+      parts.push(`<span class="sched-badge">Domains</span> every ${sched.domain_interval_hours}h`);
     }
     if (sched.webapp_interval_seconds) {
       const min = Math.round(sched.webapp_interval_seconds / 60);
-      parts.push(`webapps: every ${min}m`);
+      parts.push(`<span class="sched-badge">Webapps</span> every ${min}m`);
     }
-    text = 'Next check: ' + parts.join(' · ');
+    blocks.push('<span class="sched-block">Next check: ' + parts.join(' · ') + '</span>');
   } else {
-    text = 'Scheduler active — not yet scheduled';
+    blocks.push('<span class="sched-block">Scheduler active — not yet scheduled</span>');
   }
   if (lastCheck) {
     const statusIcon = lastCheck.status === 'completed' ? '✓' : lastCheck.status === 'running' ? '⟳' : '✗';
-    text += ` · Last run: ${statusIcon} ${lastCheck.started_at ? formatDate(lastCheck.started_at) : ''} (${lastCheck.domains_checked}/${lastCheck.domains_total})`;
+    blocks.push('<span class="sched-block">Last run: ' + statusIcon + ' ' + (lastCheck.started_at ? formatDate(lastCheck.started_at) : '') + ' (' + lastCheck.domains_checked + '/' + lastCheck.domains_total + ')</span>');
     if (lastCheck.status === 'running') dot.classList.add('running');
     else dot.classList.remove('running');
   }
-  el.textContent = text;
+  el.innerHTML = blocks.join('');
 
   // Add countdown span
   var cd = document.getElementById('scheduler-countdown');
@@ -2139,6 +2445,23 @@ function filterDomainsFromDash(type, status) {
   else setTimeout(apply, 350);
 }
 
+function filterWebappsFromDash(status) {
+  window.location.hash = 'webapps';
+  activateView('webapps');
+  var apply = function () {
+    _webappFilter = status;
+    var root = document.getElementById('webapp-filters');
+    if (root) {
+      root.querySelectorAll('.log-filter').forEach(function (chip) {
+        chip.classList.toggle('active', chip.dataset.webappFilter === status);
+      });
+    }
+    applyWebAppFilters(_webappsCache || []);
+  };
+  if (_webappsCache && _webappsCache.length) apply();
+  else setTimeout(apply, 350);
+}
+
 // ─── Domains / SSL Certs list ─────────────────────────────────
 let _cachedDomains = { full: [], ssl_only: [] };
 
@@ -2151,7 +2474,7 @@ async function loadDomains(type, forceRefresh) {
   const empty = document.getElementById('empty-state-' + suffix);
   empty.style.display = 'none';
   list.innerHTML = Array(5).fill(0).map(() =>
-    `<div class="domain-card skeleton-card"><div class="skeleton skeleton-line wide"></div><div class="skeleton skeleton-line medium"></div><div class="skeleton skeleton-line narrow"></div></div>`
+    `<div class="skeleton-card"><div class="sk-block"><div class="sk-row" style="width:55%"></div><div class="sk-row"></div><div class="sk-row" style="width:35%"></div></div><div class="sk-badge"></div></div>`
   ).join('');
   if (table) table.style.display = 'none';
 
@@ -2321,6 +2644,7 @@ function renderDomains(domains, type) {
   if (Object.keys(_prevStatuses[type]).length) _prevStatuses[type] = {};
 
   updateStats(stats, suffix);
+  updateRiskBar(stats, suffix);
   updateBulkToolbar(type);
   _observeSparklines();
 }
@@ -2340,27 +2664,27 @@ function renderTableRows(domains, type, tbody, selSet, isSslOnly, _stats) {
 
     let expiryCells = '';
     if (isSslOnly) {
-      expiryCells = `<td>${formatSslExpiry(d)}${expiryBar}<span class="sparkline-cell" data-domain-id="${d.id}"></span></td>`;
+      expiryCells = `<td class="col-ssl-exp">${formatSslExpiry(d)}${expiryBar}<span class="sparkline-cell" data-domain-id="${d.id}"></span></td>`;
     } else {
-      expiryCells = `<td>${formatDomainExpiry(d)}</td><td>${formatSslExpiry(d)}${expiryBar}<span class="sparkline-cell" data-domain-id="${d.id}"></span></td>`;
+      expiryCells = `<td class="col-domain-exp">${formatDomainExpiry(d)}</td><td class="col-ssl-exp">${formatSslExpiry(d)}${expiryBar}<span class="sparkline-cell" data-domain-id="${d.id}"></span></td>`;
     }
 
     let infoCell = '';
     if (isSslOnly) {
-      infoCell = `<td>${d.ssl_issuer ? escHtml(d.ssl_issuer.substring(0, 30)) : ''}</td>`;
+      infoCell = `<td class="col-issuer">${d.ssl_issuer ? escHtml(d.ssl_issuer.substring(0, 30)) : ''}</td>`;
     } else {
-      infoCell = `<td>${(d.manual_registrar || d.domain_registrar) ? escHtml(d.manual_registrar || d.domain_registrar) : ''}</td>`;
+      infoCell = `<td class="col-registrar">${(d.manual_registrar || d.domain_registrar) ? escHtml(d.manual_registrar || d.domain_registrar) : ''}</td>`;
     }
 
     const __isViewer = _userRole !== 'admin';
     return `<tr class="${checked ? 'selected' : ''} ${changedClass}">
-      <td><input type="checkbox" data-${isSslOnly ? 'ssl' : 'domain'}-check="${d.id}" ${checked ? 'checked' : ''}></td>
-      <td><div style="display:flex;align-items:center;gap:2px"><a class="table-url" href="https://${escHtml(d.url)}" target="_blank" rel="noopener">${escHtml(d.url)}</a><button class="btn-icon" data-action="copy-url" data-url="${escHtml(d.url)}" title="Copy URL" style="font-size:11px;padding:1px 4px">&#x2398;</button>${alertBadge}</div></td>
-      <td><span class="table-status ${status}">${statusLabel}</span></td>
+      <td class="col-checkbox"><input type="checkbox" data-${isSslOnly ? 'ssl' : 'domain'}-check="${d.id}" ${checked ? 'checked' : ''}></td>
+      <td class="col-domain"><div style="display:flex;align-items:center;gap:2px"><a class="table-url" href="https://${escHtml(d.url)}" target="_blank" rel="noopener">${escHtml(d.url)}</a><button class="btn-icon" data-action="copy-url" data-url="${escHtml(d.url)}" title="Copy URL" style="font-size:11px;padding:1px 4px">&#x2398;</button>${alertBadge}</div></td>
+      <td class="col-status"><span class="table-status ${status}">${statusLabel}</span></td>
       ${expiryCells}
       ${infoCell}
-      <td>${lastChecked}</td>
-      <td class="table-actions-cell">
+      <td class="col-checked">${lastChecked}</td>
+      <td class="col-actions table-actions-cell">
         <div class="kebab-menu">
           <button class="kebab-btn" data-action="toggle-kebab" data-id="${d.id}" aria-label="Actions">&#8942;</button>
           <div class="kebab-dropdown" id="kebab-tbl-${suffix}-${d.id}" style="display:none">
@@ -2869,10 +3193,24 @@ function updateStats(stats, suffix) {
   const total = (stats.healthy || 0) + (stats.watch || 0) + (stats.caution || 0) + (stats.warning || 0) + (stats.critical || 0) + (stats.expired || 0) + (stats.error || 0) + (stats.pending || 0);
   animateCount(document.getElementById('stat-' + suffix + '-total'), total);
   animateCount(document.getElementById('stat-' + suffix + '-healthy'), stats.healthy || 0);
-  animateCount(document.getElementById('stat-' + suffix + '-warning'), (stats.watch || 0) + (stats.caution || 0) + (stats.warning || 0) + (stats.critical || 0));
+  animateCount(document.getElementById('stat-' + suffix + '-watch'), stats.watch || 0);
+  animateCount(document.getElementById('stat-' + suffix + '-caution'), stats.caution || 0);
+  animateCount(document.getElementById('stat-' + suffix + '-warning'), stats.warning || 0);
+  animateCount(document.getElementById('stat-' + suffix + '-critical'), stats.critical || 0);
   animateCount(document.getElementById('stat-' + suffix + '-danger'), stats.expired || 0);
   animateCount(document.getElementById('stat-' + suffix + '-pending'), stats.pending || 0);
   animateCount(document.getElementById('stat-' + suffix + '-error'), stats.error || 0);
+}
+
+function updateRiskBar(stats, suffix) {
+  const categories = ['healthy', 'watch', 'caution', 'warning', 'critical', 'expired', 'error', 'pending'];
+  const total = categories.reduce((s, c) => s + (stats[c] || 0), 0);
+  const bar = document.getElementById('risk-bar-' + suffix);
+  if (!bar) return;
+  categories.forEach(c => {
+    const seg = bar.querySelector('.risk-bar-segment.' + c);
+    if (seg) seg.style.flex = total > 0 ? (stats[c] || 0) / total : 0;
+  });
 }
 
 function updateDomainResultSummary(type, filteredCount, totalCount) {
@@ -3174,9 +3512,9 @@ function getSettingsFormData() {
 function updateUnsavedIndicator() {
   const el = document.getElementById('unsaved-indicator');
   if (!el) return;
-  const current = getSettingsFormData();
-  const dirty = JSON.stringify(current) !== JSON.stringify(_settingsOriginal);
-  _settingsDirty = dirty;
+  const settingsCurrent = getSettingsFormData();
+  _settingsDirty = JSON.stringify(settingsCurrent) !== JSON.stringify(_settingsOriginal);
+  const dirty = _settingsDirty || _securityDirty || _emailTplDirty;
   el.style.display = dirty ? 'inline' : 'none';
 }
 
@@ -3188,7 +3526,7 @@ document.getElementById('webhooks-form').addEventListener('change', () => update
 
 // Unsaved changes warning
 window.addEventListener('beforeunload', (e) => {
-  if (_settingsDirty) { e.preventDefault(); e.returnValue = ''; }
+  if (_settingsDirty || _securityDirty || _emailTplDirty) { e.preventDefault(); e.returnValue = ''; }
 });
 
 document.getElementById('settings-form').addEventListener('submit', async (e) => {
@@ -3321,6 +3659,10 @@ document.addEventListener('click', (e) => {
     document.getElementById('require_lowercase').checked = true;
     document.getElementById('require_number').checked = true;
     document.getElementById('require_special').checked = false;
+    document.getElementById('log_retention_days').value = 90;
+    _securityDirty = JSON.stringify(getSecurityFormData()) !== JSON.stringify(_securityOriginal);
+    updateUnsavedIndicator();
+    updatePwPolicyFromForm();
     toast('Security settings reset to defaults');
   }
 });
@@ -3477,8 +3819,25 @@ function validatePassword(pw) {
 }
 
 // ─── Security settings ─────────────────────────────────────────
+function getSecurityFormData() {
+  return {
+    session_timeout: document.getElementById('session_timeout').value,
+    max_login_attempts: document.getElementById('max_login_attempts').value,
+    lockout_duration: document.getElementById('lockout_duration').value,
+    min_password_length: document.getElementById('min_password_length').value,
+    require_uppercase: document.getElementById('require_uppercase').checked,
+    require_lowercase: document.getElementById('require_lowercase').checked,
+    require_number: document.getElementById('require_number').checked,
+    require_special: document.getElementById('require_special').checked,
+    log_retention_days: document.getElementById('log_retention_days').value,
+  };
+}
+
 function loadSecuritySettings() {
-  api('GET', '/api/security-settings').then(s => {
+  Promise.all([
+    api('GET', '/api/security-settings'),
+    api('GET', '/api/settings').catch(() => ({}))
+  ]).then(([s, g]) => {
     document.getElementById('session_timeout').value = s.session_timeout || 60;
     document.getElementById('max_login_attempts').value = s.max_login_attempts || 5;
     document.getElementById('lockout_duration').value = s.lockout_duration || 15;
@@ -3487,6 +3846,7 @@ function loadSecuritySettings() {
     document.getElementById('require_lowercase').checked = s.require_lowercase !== false;
     document.getElementById('require_number').checked = s.require_number !== false;
     document.getElementById('require_special').checked = s.require_special || false;
+    document.getElementById('log_retention_days').value = (g && g.log_retention_days != null) ? g.log_retention_days : 90;
     _pwPolicy = {
       minLength: s.min_password_length || 8,
       requireUpper: s.require_uppercase !== false,
@@ -3494,6 +3854,10 @@ function loadSecuritySettings() {
       requireNumber: s.require_number !== false,
       requireSpecial: s.require_special || false
     };
+    _securityOriginal = getSecurityFormData();
+    _securityDirty = false;
+    updateUnsavedIndicator();
+    updatePwPolicyFromForm();
   }).catch(() => {});
 }
 
@@ -3509,6 +3873,7 @@ document.getElementById('security-form').addEventListener('submit', async (e) =>
     require_lowercase: document.getElementById('require_lowercase').checked,
     require_number: document.getElementById('require_number').checked,
     require_special: document.getElementById('require_special').checked,
+    log_retention_days: parseInt(document.getElementById('log_retention_days').value) || 90,
   };
   setLoading(btn, true);
   try {
@@ -3520,11 +3885,58 @@ document.getElementById('security-form').addEventListener('submit', async (e) =>
       requireNumber: settings.require_number,
       requireSpecial: settings.require_special
     };
+    _securityOriginal = getSecurityFormData();
+    _securityDirty = false;
+    updateUnsavedIndicator();
     toast('Security settings saved');
     try { await api('POST', '/api/logs', { message: 'Security settings updated', type: 'settings_change' }); } catch {}
   } catch (e) { toast(e.message, 'error'); }
   finally { setLoading(btn, false); }
 });
+
+document.getElementById('security-form').addEventListener('input', () => {
+  _securityDirty = JSON.stringify(getSecurityFormData()) !== JSON.stringify(_securityOriginal);
+  updateUnsavedIndicator();
+});
+document.getElementById('security-form').addEventListener('change', () => {
+  _securityDirty = JSON.stringify(getSecurityFormData()) !== JSON.stringify(_securityOriginal);
+  updateUnsavedIndicator();
+});
+
+// ─── Password policy test ───────────────────────────────────────
+function updatePwPolicyFromForm() {
+  _pwPolicy = {
+    minLength: parseInt(document.getElementById('min_password_length').value) || 8,
+    requireUpper: document.getElementById('require_uppercase').checked,
+    requireLower: document.getElementById('require_lowercase').checked,
+    requireNumber: document.getElementById('require_number').checked,
+    requireSpecial: document.getElementById('require_special').checked,
+  };
+  validatePwTestInput();
+}
+
+function validatePwTestInput() {
+  var val = document.getElementById('pw-policy-test-input').value;
+  var results = document.getElementById('pw-policy-test-results');
+  if (!results) return;
+  if (!val) { results.innerHTML = ''; return; }
+  var checks = [
+    { label: 'At least ' + _pwPolicy.minLength + ' characters', pass: val.length >= _pwPolicy.minLength },
+    { label: 'Uppercase letter', pass: !_pwPolicy.requireUpper || /[A-Z]/.test(val) },
+    { label: 'Lowercase letter', pass: !_pwPolicy.requireLower || /[a-z]/.test(val) },
+    { label: 'Number', pass: !_pwPolicy.requireNumber || /\d/.test(val) },
+    { label: 'Special character (!@#$%^&*)', pass: !_pwPolicy.requireSpecial || /[!@#$%^&*]/.test(val) },
+  ];
+  results.innerHTML = checks.map(function (c) {
+    return '<div class="pw-policy-check' + (c.pass ? ' pass' : ' fail') + '">' + (c.pass ? '&#10003;' : '&#10007;') + ' ' + c.label + '</div>';
+  }).join('');
+}
+
+document.querySelectorAll('#security-form input').forEach(function (el) {
+  el.addEventListener('input', updatePwPolicyFromForm);
+  el.addEventListener('change', updatePwPolicyFromForm);
+});
+document.getElementById('pw-policy-test-input').addEventListener('input', validatePwTestInput);
 
 // ─── API Keys ──────────────────────────────────────────────────
 function loadApiKeys(force) {
@@ -3612,28 +4024,132 @@ document.addEventListener('click', (e) => {
     window.open(`/api/backups/download/${e.target.dataset.file}`, '_blank');
   }
   if (e.target.dataset.action === 'restore-backup') {
-    if (!confirm(`Restore database from ${e.target.dataset.file}? This will replace the current database.`)) return;
-    var restoreBtn = e.target;
-    setLoading(restoreBtn, true);
-    api('POST', '/api/backups/restore', { filename: e.target.dataset.file }).then(() => {
+    var filename = e.target.dataset.file;
+    document.getElementById('restore-filename-display').textContent = filename;
+    document.getElementById('restore-confirm-input').value = '';
+    document.getElementById('backup-restore-pane').style.display = '';
+    document.getElementById('restore-confirm-input').focus();
+  }
+  if (e.target.dataset.action === 'close-backup-restore') {
+    document.getElementById('backup-restore-pane').style.display = 'none';
+  }
+  if (e.target.dataset.action === 'confirm-restore-backup') {
+    var filename = document.getElementById('restore-filename-display').textContent;
+    var typed = document.getElementById('restore-confirm-input').value.trim();
+    if (typed !== filename) { toast('Filename does not match. Restore cancelled.', 'error'); return; }
+    var btn = e.target;
+    setLoading(btn, true);
+    api('POST', '/api/backups/restore', { filename: filename }).then(() => {
       toast('Database restored. Reloading...');
       setTimeout(() => window.location.reload(), 1500);
     }).catch(e => {
       toast(e.message, 'error');
-      setLoading(restoreBtn, false);
+      setLoading(btn, false);
+      document.getElementById('backup-restore-pane').style.display = 'none';
     });
   }
   if (e.target.dataset.action === 'delete-backup') {
     if (!confirm(`Delete backup ${e.target.dataset.file}?`)) return;
     api('DELETE', `/api/backups/${e.target.dataset.file}`).then(() => {
       toast('Backup deleted');
+      _backupState.selected.delete(e.target.dataset.file);
       loadBackupsViewList();
     }).catch(e => toast(e.message, 'error'));
   }
+  if (e.target.dataset.action === 'delete-selected-backups') {
+    var count = _backupState.selected.size;
+    if (count === 0) return;
+    if (!confirm('Delete ' + count + ' selected backup' + (count > 1 ? 's' : '') + '?')) return;
+    var files = Array.from(_backupState.selected);
+    var btn = e.target;
+    setLoading(btn, true);
+    api('POST', '/api/backups/bulk-delete', { files: files }).then(function () {
+      toast('Deleted ' + count + ' backup' + (count > 1 ? 's' : ''));
+      _backupState.selected.clear();
+      loadBackupsViewList();
+    }).catch(function (e) { toast(e.message, 'error'); }).finally(function () {
+      setLoading(btn, false);
+    });
+  }
+  if (e.target.dataset.action === 'backup-prev') {
+    if (_backupState.page > 1) { _backupState.page--; renderBackupPage(); }
+  }
+  if (e.target.dataset.action === 'backup-next') {
+    if (_backupState.page < _getBackupMaxPage()) { _backupState.page++; renderBackupPage(); }
+  }
+  if (e.target.dataset.action === 'backup-jump') {
+    var val = parseInt(document.getElementById('backup-page-jump-input').value);
+    var maxPage = _getBackupMaxPage();
+    if (isNaN(val) || val < 1) val = 1;
+    if (val > maxPage) val = maxPage;
+    _backupState.page = val;
+    renderBackupPage();
+  }
 });
+
+function renderBackupPage() {
+  const container = document.getElementById('backups-view-list');
+  if (!container || _backupState.backups.length === 0) return;
+  var items = _getBackupPageItems();
+  container.innerHTML = items.map(function (b) {
+    var meta = '';
+    var formatBadge = '';
+    if (b.filename && b.filename.endsWith('.sql.gz')) formatBadge = '<span class="badge badge-pg">pg_dump</span>';
+    else if (b.filename && b.filename.endsWith('.json.gz')) formatBadge = '<span class="badge badge-json">JSON</span>';
+    else formatBadge = '<span class="badge badge-sqlite">SQLite</span>';
+    if (b.domain_count !== undefined && b.domain_count !== null) {
+      meta += '<span class="backup-meta-item">' + b.domain_count + ' domains</span> ';
+    }
+    meta += '<span class="backup-meta-item">' + formatSize(b.size) + '</span>';
+    if (b.notes) {
+      meta += ' <span class="backup-meta-item backup-notes">Notes: ' + escHtml(b.notes) + '</span>';
+    }
+    var checked = _backupState.selected.has(b.filename) ? ' checked' : '';
+    return '<div class="backup-card' + (_backupState.selected.has(b.filename) ? ' backup-card-selected' : '') + '" data-backup-file="' + escHtml(b.filename) + '">' +
+      '<div class="backup-check-col"><input type="checkbox" class="backup-card-checkbox" data-backup-cb="' + escHtml(b.filename) + '"' + checked + '></div>' +
+      '<div class="backup-info">' +
+        '<div class="backup-name">' + formatBadge + ' ' + escHtml(b.filename) + '</div>' +
+        '<div class="backup-meta">' + meta + ' · Created: ' + formatDate(b.created) + '</div>' +
+      '</div>' +
+      '<div class="backup-actions">' +
+        '<button class="btn btn-sm btn-secondary" data-action="download-backup" data-file="' + escHtml(b.filename) + '">Download</button>' +
+        '<button class="btn btn-sm btn-secondary" data-action="restore-backup" data-file="' + escHtml(b.filename) + '">Restore</button>' +
+        '<button class="btn btn-sm btn-danger" data-action="delete-backup" data-file="' + escHtml(b.filename) + '">Delete</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+  _updateBackupPagination();
+}
+
+// ─── Backup state ─────────────────────────────────────────────
+let _backupState = { backups: [], filtered: [], page: 1, perPage: 10, search: '', selected: new Set() };
+
+function _resetBackupState() {
+  _backupState.backups = [];
+  _backupState.filtered = [];
+  _backupState.page = 1;
+  _backupState.search = '';
+  _backupState.selected.clear();
+}
+
+function _filterBackups() {
+  var s = _backupState.search.toLowerCase().trim();
+  _backupState.filtered = s ? _backupState.backups.filter(function (b) { return b.filename.toLowerCase().includes(s) || (b.notes && b.notes.toLowerCase().includes(s)); }) : _backupState.backups.slice();
+  if (_backupState.page > _getBackupMaxPage()) _backupState.page = _getBackupMaxPage();
+}
+
+function _getBackupMaxPage() {
+  return Math.max(1, Math.ceil(_backupState.filtered.length / _backupState.perPage));
+}
+
+function _getBackupPageItems() {
+  var start = (_backupState.page - 1) * _backupState.perPage;
+  return _backupState.filtered.slice(start, start + _backupState.perPage);
+}
 
 // ─── Backup dedicated view ────────────────────────────────────
 function loadBackupsView() {
+  _resetBackupState();
   loadBackupDbInfo();
   loadBackupsViewList();
 }
@@ -3659,6 +4175,16 @@ function loadBackupDbInfo() {
       var nb = relativeTime(info.next_backup_at);
       nextBackupHtml = '<span class="backup-meta-item">Next backup: <strong>' + nb + '</strong></span>';
     }
+    var lastBackupHtml = '';
+    if (info.last_backup_at) {
+      lastBackupHtml = '<span class="backup-meta-item">Last backup: <strong>' + formatDate(info.last_backup_at) + '</strong></span>';
+    }
+
+    // Pre-fill schedule form with current values
+    if (typeof info.schedule_hour === 'number') document.getElementById('backup-schedule-hour').value = info.schedule_hour;
+    if (typeof info.schedule_minute === 'number') document.getElementById('backup-schedule-minute').value = info.schedule_minute;
+    if (typeof info.max_backups === 'number') document.getElementById('backup-max-retention').value = info.max_backups;
+
     container.innerHTML =
       '<div class="backup-db-card">' +
         '<div class="backup-db-header">' +
@@ -3671,6 +4197,7 @@ function loadBackupDbInfo() {
             '<span class="backup-meta-item">Web Apps: <strong>' + (info.webapp_count !== null && info.webapp_count !== undefined ? info.webapp_count : 'N/A') + '</strong></span>' +
             '<span class="backup-meta-item">Backups: <strong>' + info.backup_count + '</strong></span>' +
             '<span class="backup-meta-item">Max Retention: <strong>' + info.max_backups + '</strong></span>' +
+            lastBackupHtml +
             connInfo +
             nextBackupHtml +
           '</div>' +
@@ -3688,13 +4215,26 @@ function loadBackupsViewList() {
   container.innerHTML = '<div class="settings-list-state">Loading backups...</div>';
   api('GET', '/api/backups').then(backups => {
     if (!container) return;
+    _backupState.backups = backups;
+    _filterBackups();
+
+    if (_backupState.filtered.length === 0 && _backupState.search) {
+      container.innerHTML = '<div class="settings-list-state">No backups match "' + escHtml(_backupState.search) + '".</div>';
+      if (label) label.textContent = backups.length + ' backup' + (backups.length !== 1 ? 's' : '');
+      _updateBackupPagination();
+      return;
+    }
     if (backups.length === 0) {
       container.innerHTML = '<div class="settings-list-state">No backups yet. Create one to get started.</div>';
       if (label) label.textContent = '0 backups';
+      _updateBackupPagination();
       return;
     }
-    if (label) label.textContent = backups.length + ' backup' + (backups.length !== 1 ? 's' : '');
-    container.innerHTML = backups.map(b => {
+
+    if (label) label.textContent = _backupState.filtered.length + ' of ' + backups.length + ' backup' + (backups.length !== 1 ? 's' : '');
+
+    var items = _getBackupPageItems();
+    container.innerHTML = items.map(function (b) {
       var meta = '';
       var formatBadge = '';
       if (b.filename && b.filename.endsWith('.sql.gz')) formatBadge = '<span class="badge badge-pg">pg_dump</span>';
@@ -3707,7 +4247,9 @@ function loadBackupsViewList() {
       if (b.notes) {
         meta += ' <span class="backup-meta-item backup-notes">Notes: ' + escHtml(b.notes) + '</span>';
       }
-      return '<div class="backup-card">' +
+      var checked = _backupState.selected.has(b.filename) ? ' checked' : '';
+      return '<div class="backup-card' + (_backupState.selected.has(b.filename) ? ' backup-card-selected' : '') + '" data-backup-file="' + escHtml(b.filename) + '">' +
+        '<div class="backup-check-col"><input type="checkbox" class="backup-card-checkbox" data-backup-cb="' + escHtml(b.filename) + '"' + checked + '></div>' +
         '<div class="backup-info">' +
           '<div class="backup-name">' + formatBadge + ' ' + escHtml(b.filename) + '</div>' +
           '<div class="backup-meta">' + meta + ' · Created: ' + formatDate(b.created) + '</div>' +
@@ -3719,15 +4261,51 @@ function loadBackupsViewList() {
         '</div>' +
       '</div>';
     }).join('');
+    _updateBackupPagination();
   }).catch(e => {
     if (container) container.innerHTML = '<div class="settings-list-state error">Failed to load backups: ' + escHtml(e.message) + '</div>';
   });
 }
 
+function _updateBackupPagination() {
+  var pagination = document.getElementById('backup-pagination');
+  var pageInfo = document.getElementById('backup-page-info');
+  var prevBtn = document.getElementById('backup-prev-btn');
+  var nextBtn = document.getElementById('backup-next-btn');
+  var jumpInput = document.getElementById('backup-page-jump-input');
+  if (!pagination || !pageInfo) return;
+
+  var total = _backupState.filtered.length;
+  var maxPage = _getBackupMaxPage();
+  var perPage = _backupState.perPage;
+
+  if (total <= perPage) {
+    pagination.style.display = 'none';
+    return;
+  }
+
+  pagination.style.display = 'flex';
+  var start = ( _backupState.page - 1) * perPage + 1;
+  var end = Math.min(_backupState.page * perPage, total);
+  pageInfo.textContent = 'Showing ' + start + '–' + end + ' of ' + total;
+
+  if (prevBtn) prevBtn.disabled = _backupState.page <= 1;
+  if (nextBtn) nextBtn.disabled = _backupState.page >= maxPage;
+  if (jumpInput) { jumpInput.value = _backupState.page; jumpInput.max = maxPage; }
+
+  var label = document.getElementById('backup-count-label');
+  if (label) {
+    var totalBackups = _backupState.backups.length;
+    label.textContent = _backupState.filtered.length + ' of ' + totalBackups + ' backup' + (totalBackups !== 1 ? 's' : '');
+  }
+}
+
 function createBackupWithNotes() {
   var notes = document.getElementById('backup-notes-input').value.trim();
   var btn = document.querySelector('[data-action="confirm-create-backup"]');
+  var headerBtn = document.getElementById('btn-create-backup');
   setLoading(btn, true);
+  if (headerBtn) headerBtn.classList.add('btn-loading');
   api('POST', '/api/backups', notes ? { notes: notes } : undefined).then(() => {
     toast('Backup created');
     document.getElementById('backup-create-pane').style.display = 'none';
@@ -3735,6 +4313,7 @@ function createBackupWithNotes() {
     loadBackupDbInfo();
   }).catch(e => toast(e.message, 'error')).finally(function () {
     setLoading(btn, false);
+    if (headerBtn) headerBtn.classList.remove('btn-loading');
   });
 }
 
@@ -3783,15 +4362,55 @@ function saveBackupSchedule() {
   });
 }
 
+function _updateBackupBulkDeleteBtn() {
+  var btn = document.getElementById('btn-delete-selected-backups');
+  if (!btn) return;
+  btn.style.display = _backupState.selected.size > 0 ? '' : 'none';
+  btn.textContent = 'Delete Selected (' + _backupState.selected.size + ')';
+}
+
 // API key checkbox → bulk revoke button
 document.addEventListener('change', function (e) {
   if (e.target.classList.contains('api-key-cb')) updateBulkRevokeBtn();
+});
+
+// Backup search input
+document.addEventListener('input', function (e) {
+  if (e.target.id === 'backup-search') {
+    _backupState.search = e.target.value;
+    _backupState.page = 1;
+    _filterBackups();
+    loadBackupsViewList();
+  }
+});
+
+// Backup bulk selection checkboxes
+document.addEventListener('change', function (e) {
+  if (e.target.dataset.backupCb) {
+    var filename = e.target.dataset.backupCb;
+    if (e.target.checked) {
+      _backupState.selected.add(filename);
+    } else {
+      _backupState.selected.delete(filename);
+    }
+    _updateBackupBulkDeleteBtn();
+    var card = document.querySelector('.backup-card[data-backup-file="' + escHtml(filename) + '"]');
+    if (card) card.classList.toggle('backup-card-selected', e.target.checked);
+  }
 });
 
 // ─── Email Templates ──────────────────────────────────────────
 let _emailTplDefaults = {};
 let _currentEmailTpl = 'ssl_alert';
 let _emailTplLoaded = false;
+
+function getEmailTplFormData() {
+  return {
+    subject: document.getElementById('email-tpl-subject').value,
+    body_html: document.getElementById('email-tpl-html').value,
+    body_text: document.getElementById('email-tpl-text').value,
+  };
+}
 
 function loadEmailTemplates(force) {
   const form = document.getElementById('email-tpl-form');
@@ -3807,6 +4426,13 @@ function loadEmailTemplates(force) {
   });
 }
 
+const _emailTplVars = {
+  ssl_alert: '{domain}, {status}, {ssl_days_left}, {ssl_expiry}, {issuer}, {date}',
+  domain_alert: '{domain}, {status}, {domain_days_left}, {domain_expiry}, {registrar}, {ssl_days_left}, {ssl_expiry}, {issuer}, {date}',
+  webapp_alert: '{domain}, {url}, {status}, {status_code}, {date}',
+  check_complete: '{date}, {ssl_total}, {ssl_healthy}, {ssl_warning}, {ssl_expired}, {domain_total}, {domain_healthy}, {domain_warning}, {domain_expired}',
+};
+
 function renderEmailTplTab(tplName) {
   _currentEmailTpl = tplName;
   document.querySelectorAll('.email-tpl-tab').forEach(t => t.classList.toggle('active', t.dataset.tpl === tplName));
@@ -3816,6 +4442,13 @@ function renderEmailTplTab(tplName) {
   document.getElementById('email-tpl-html').value = tpl.body_html || '';
   document.getElementById('email-tpl-text').value = tpl.body_text || '';
   document.getElementById('email-tpl-preview').style.display = 'none';
+
+  _emailTplOriginal = getEmailTplFormData();
+  _emailTplDirty = false;
+  updateUnsavedIndicator();
+
+  const hint = document.getElementById('email-tpl-vars');
+  if (hint) hint.textContent = 'Variables: ' + (_emailTplVars[tplName] || '');
 }
 
 document.addEventListener('click', (e) => {
@@ -3838,6 +4471,22 @@ document.addEventListener('click', (e) => {
       toast('Templates reset to defaults');
     });
   }
+  if (e.target.dataset.action === 'restore-email-tpl') {
+    if (!confirm('Restore "' + _currentEmailTpl + '" to default? Unsaved changes will be lost.')) return;
+    api('PUT', '/api/email-templates/' + _currentEmailTpl + '/restore', {}).then(() => {
+      loadEmailTemplates(true);
+      toast('"' + _currentEmailTpl + '" restored to default');
+    }).catch(e => toast(e.message, 'error'));
+  }
+});
+
+document.getElementById('email-tpl-form').addEventListener('input', () => {
+  _emailTplDirty = JSON.stringify(getEmailTplFormData()) !== JSON.stringify(_emailTplOriginal);
+  updateUnsavedIndicator();
+});
+document.getElementById('email-tpl-form').addEventListener('change', () => {
+  _emailTplDirty = JSON.stringify(getEmailTplFormData()) !== JSON.stringify(_emailTplOriginal);
+  updateUnsavedIndicator();
 });
 
 document.getElementById('email-tpl-form').addEventListener('submit', async (e) => {
@@ -3852,6 +4501,9 @@ document.getElementById('email-tpl-form').addEventListener('submit', async (e) =
   try {
     await api('PUT', `/api/email-templates/${_currentEmailTpl}`, tpl);
     _emailTplDefaults[_currentEmailTpl] = tpl;
+    _emailTplOriginal = getEmailTplFormData();
+    _emailTplDirty = false;
+    updateUnsavedIndicator();
     toast('Template saved');
   } catch (err) {
     toast(err.message, 'error');
@@ -4263,7 +4915,8 @@ function doImport() {
 
 function refreshDomains() {
   var type = activeView === 'sslcerts' ? 'ssl_only' : 'full';
-  loadDomains(type);
+  clearDomainsCache(type);
+  loadDomains(type, true);
 }
 
 
@@ -4312,24 +4965,173 @@ function resetImportModal() {
 }
 
 // ─── Cert Details Modal ────────────────────────────────────────
+let _certKeyHandler = null;
+let _lastCertId = null;
+
+function fmtTimeRemaining(days) {
+  if (days == null || days < 0) return '';
+  const units = [
+    [365, 'year'], [30, 'month'], [7, 'week'], [1, 'day']
+  ];
+  for (const [div, label] of units) {
+    if (days >= div) {
+      const n = Math.floor(days / div);
+      const rem = div > 1 ? days % div : 0;
+      let s = `${n} ${label}${n !== 1 ? 's' : ''}`;
+      if (rem > 0) s += `, ${rem} day${rem !== 1 ? 's' : ''}`;
+      return s;
+    }
+  }
+  return `${days} day${days !== 1 ? 's' : ''}`;
+}
+
+function copyToClipboard(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    btn.classList.add('copied');
+    btn.textContent = '✓';
+    setTimeout(() => { btn.classList.remove('copied'); btn.textContent = '📋'; }, 1500);
+  }).catch(() => {});
+}
+
 function openCertModal(id) {
-  document.getElementById('cert-details').innerHTML = '<div class="cert-loading">Loading...</div>';
+  _lastCertId = id;
+  document.getElementById('cert-details').innerHTML = '<div class="cert-loading"><span class="detail-loading spinner"></span> Loading...</div>';
+  document.getElementById('cert-status-bar').style.display = 'none';
+  document.getElementById('cert-modal-footer').style.display = 'none';
+  document.getElementById('cert-check-now-btn').disabled = false;
+  document.getElementById('cert-check-now-btn').textContent = '\u21bb Check Now';
   document.getElementById('cert-modal').classList.add('open');
+  // Escape key to close (clean up previous first)
+  if (_certKeyHandler) document.removeEventListener('keydown', _certKeyHandler);
+  _certKeyHandler = e => { if (e.key === 'Escape') closeCertModal(); };
+  document.addEventListener('keydown', _certKeyHandler);
   api('GET', `/api/domains/${id}/cert`).then(d => {
-    const rows = [
-      ['Domain', d.url],
-      ['Status', d.status],
-      ['Issuer', d.ssl_issuer || 'N/A'],
-      ['Subject', d.ssl_subject || 'N/A'],
-      ['Valid From', d.ssl_valid_from ? d.ssl_valid_from.slice(0, 10) : 'N/A'],
-      ['Valid Until', d.ssl_valid_until ? d.ssl_valid_until.slice(0, 10) : 'N/A'],
-      ['Expiry', d.ssl_expiry || 'N/A'],
-      ['SANs', d.ssl_sans || 'N/A'],
-      ['Last Checked', d.last_checked ? formatDate(d.last_checked) : 'N/A'],
-    ];
-    document.getElementById('cert-details').innerHTML = rows.map(([k, v]) =>
-      `<div class="cert-row"><div class="cert-label">${k}</div><div class="cert-value">${escHtml(String(v))}</div></div>`
-    ).join('');
+    const statusMap = { healthy: 'Healthy >90d', watch: 'Watch 60-90d', caution: 'Caution 30-60d', warning: 'Warning 7-30d', critical: 'Critical <7d', expired: 'Expired', error: 'Error', pending: 'Pending' };
+    const s = (d.status || 'pending').toLowerCase();
+    const badge = document.getElementById('cert-status-badge');
+    badge.innerHTML = statusMap[s] || s;
+    badge.className = 'cert-status-badge ' + (s === 'healthy' || s === 'watch' ? 'healthy' : s === 'caution' || s === 'warning' ? 'warning' : s === 'critical' || s === 'expired' ? 'expired' : s === 'error' ? 'error' : 'pending');
+    const expiryDays = parseInt(d.ssl_days_left) || 0;
+    const pct = Math.min(100, Math.max(0, (expiryDays / 365) * 100));
+    const fill = document.getElementById('cert-expiry-bar-fill');
+    fill.style.width = pct + '%';
+    fill.style.background = expiryDays > 90 ? 'var(--green)' : expiryDays > 30 ? 'var(--yellow)' : 'var(--red)';
+    document.getElementById('cert-status-bar').style.display = 'flex';
+
+    const cc = (v, label) => `<button class="cert-copy-btn" data-copy="${escHtml(String(v))}" title="Copy ${label}">📋</button>`;
+    const row = (label, val, suffix) => val ? `<div class="cert-row"><div class="cert-label">${label}</div><div class="cert-value">${escHtml(String(val))}${suffix || ''}</div></div>` : '';
+    const rowRaw = (label, val, suffix) => val ? `<div class="cert-row"><div class="cert-label">${label}</div><div class="cert-value">${val}${suffix || ''}</div></div>` : '';
+    const valMono = (v) => v ? `<span class="cert-value-mono">${escHtml(String(v))}</span>` : 'N/A';
+
+    // Human-readable time remaining
+    let humanTime = '';
+    if (d.ssl_days_left != null && parseInt(d.ssl_days_left) >= 0) {
+      humanTime = `<span class="cert-human-time">(${fmtTimeRemaining(parseInt(d.ssl_days_left))})</span>`;
+    }
+
+    // SANs: format as comma-separated
+    let sansDisplay = 'N/A';
+    let sansRaw = '';
+    if (d.ssl_sans) {
+      try { const parsed = JSON.parse(d.ssl_sans); sansDisplay = parsed.join(', '); sansRaw = parsed.join('\n'); } catch { sansDisplay = d.ssl_sans; sansRaw = d.ssl_sans; }
+    }
+
+    // Fingerprint formatted with colons
+    let fpFormatted = d.ssl_fingerprint || '';
+    if (fpFormatted && fpFormatted.length === 64) {
+      fpFormatted = fpFormatted.match(/.{2}/g).join(':').toUpperCase();
+    }
+
+    // Serial formatted
+    let serialFormatted = d.ssl_serial || '';
+    if (serialFormatted && serialFormatted.length > 4 && /^[0-9A-Fa-f]+$/.test(serialFormatted)) {
+      serialFormatted = serialFormatted.match(/.{2}/g).join(':').toUpperCase();
+    }
+
+    const parts = [];
+
+    // Identity section
+    let identity = '<div class="cert-section-title">Identity</div>';
+    identity += row('Domain', d.url, cc(d.url, 'domain'));
+    identity += row('Issuer', d.ssl_issuer || 'N/A');
+    identity += row('Subject', d.ssl_subject || 'N/A', d.ssl_subject ? cc(d.ssl_subject, 'subject') : '');
+    parts.push(identity);
+
+    // Validity section
+    let validity = '<div class="cert-section-title">Validity</div>';
+    validity += row('Valid From', d.ssl_valid_from ? d.ssl_valid_from.slice(0, 10) : 'N/A');
+    validity += row('Valid Until', d.ssl_valid_until ? d.ssl_valid_until.slice(0, 10) : 'N/A');
+    validity += row('Expiry Date', d.ssl_expiry || 'N/A');
+    validity += row('Days Left', d.ssl_days_left != null ? String(d.ssl_days_left) : 'N/A', d.ssl_days_left != null ? ' ' + humanTime : '');
+    validity += `<div id="cert-trend-container" class="cert-trend"></div>`;
+    parts.push(validity);
+
+    // Security section
+    const hasSecurity = d.ssl_tls_version || d.ssl_cipher || d.ssl_fingerprint || d.ssl_serial;
+    if (hasSecurity) {
+      let sec = '<div class="cert-section-title">Security</div>';
+      if (d.ssl_tls_version) sec += row('TLS Version', d.ssl_tls_version);
+      if (d.ssl_cipher) sec += row('Cipher', d.ssl_cipher);
+      if (d.ssl_fingerprint) sec += rowRaw('Fingerprint (SHA-256)', valMono(fpFormatted), cc(d.ssl_fingerprint, 'fingerprint'));
+      if (d.ssl_serial) sec += rowRaw('Serial Number', serialFormatted ? valMono(serialFormatted) : 'N/A');
+      parts.push(sec);
+    }
+
+    // SANs section
+    if (sansDisplay !== 'N/A' && sansDisplay) {
+      let sans = '<div class="cert-section-title">Subject Alternative Names (SANs)</div>';
+      sans += `<div class="cert-row"><div class="cert-label">SANs</div><div class="cert-value">${escHtml(sansDisplay)}${cc(sansRaw || sansDisplay, 'SANs')}</div></div>`;
+      parts.push(sans);
+    }
+
+    // Notes & Tags
+    let meta = '';
+    if (d.notes || d.tags) {
+      meta += '<div class="cert-section-title">Metadata</div>';
+      if (d.notes) meta += row('Notes', d.notes);
+      if (d.tags) meta += row('Tags', d.tags);
+      parts.push(meta);
+    }
+
+    // PEM toggle
+    if (d.ssl_pem) {
+      let pemSection = '<div class="cert-section-title">Certificate Chain</div>';
+      pemSection += `<div class="cert-pem-toggle" data-action="toggle-pem">&#9654; Show PEM</div>`;
+      pemSection += `<div class="cert-pem-block" id="cert-pem-block">${escHtml(d.ssl_pem)}</div>`;
+      parts.push(pemSection);
+    }
+
+    document.getElementById('cert-details').innerHTML = parts.join('');
+
+    // Load sparkline trend
+    api('GET', `/api/domains/${id}/history?days=30`).then(h => {
+      const hist = Array.isArray(h) ? h : (h.history || []);
+      if (hist.length < 2) return;
+      const values = hist.map(p => parseInt(p.ssl_days_left)).filter(v => !isNaN(v));
+      if (values.length < 2) return;
+      const container = document.getElementById('cert-trend-container');
+      if (!container) return;
+      const w = 240, h2 = 32;
+      const max = Math.max(...values), min = Math.min(...values);
+      const range = Math.max(max - min, 1);
+      const pts = values.map((v, i) => {
+        const x = (i / (values.length - 1)) * w;
+        const y = h2 - ((v - min) / range) * (h2 - 4) - 2;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(' ');
+      const color = values[values.length - 1] > 90 ? 'var(--green)' : values[values.length - 1] > 30 ? 'var(--yellow)' : 'var(--red)';
+      container.innerHTML = `<div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">Days left (30d trend)</div><svg width="${w}" height="${h2}" viewBox="0 0 ${w} ${h2}" style="display:block;max-width:100%"><polyline fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${pts}"/><circle cx="${((values.length - 1) / (values.length - 1)) * w}" cy="${h2 - ((values[values.length - 1] - min) / range) * (h2 - 4) - 2}" r="3" fill="${color}"/></svg>`;
+    }).catch(() => {});
+
+    // Footer: last checked + check now
+    const footer = document.getElementById('cert-modal-footer');
+    const lcEl = document.getElementById('cert-last-checked');
+    if (d.last_checked) {
+      lcEl.innerHTML = 'Last checked: <span class="rel-time" data-date="' + d.last_checked + '" title="' + formatDate(d.last_checked) + '">' + relativeTime(d.last_checked) + '</span>';
+    } else {
+      lcEl.textContent = 'Never checked';
+    }
+    footer.style.display = 'flex';
   }).catch(e => {
     document.getElementById('cert-details').innerHTML = `<div class="cert-loading">Error: ${e.message}</div>`;
   });
@@ -4337,6 +5139,9 @@ function openCertModal(id) {
 
 function closeCertModal() {
   document.getElementById('cert-modal').classList.remove('open');
+  document.getElementById('cert-status-bar').style.display = 'none';
+  document.getElementById('cert-modal-footer').style.display = 'none';
+  if (_certKeyHandler) { document.removeEventListener('keydown', _certKeyHandler); _certKeyHandler = null; }
 }
 
 // ─── Logs ──────────────────────────────────────────────────────
@@ -4350,6 +5155,12 @@ async function refreshLogs() {
     type: logState.filter || 'all',
     q: logState.query || ''
   });
+  if (logState.from_date) params.set('from_date', logState.from_date);
+  if (logState.to_date) params.set('to_date', logState.to_date);
+  if (logState.exclude) {
+    params.delete('type');
+    params.set('exclude_type', logState.filter || '');
+  }
   tbody.innerHTML = '<tr><td colspan="5" class="log-state-cell">Loading logs...</td></tr>';
   mobileEl.innerHTML = '<div class="log-card log-state-card">Loading logs...</div>';
   try {
@@ -4390,7 +5201,7 @@ async function refreshLogs() {
     }
     renderLogSummary(data.summary || {});
     updateLogPagination();
-    renderActivityBar(logs);
+    loadActivityBar();
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="5" class="log-state-cell">Failed to load logs: ${escHtml(e.message)}</td></tr>`;
     mobileEl.innerHTML = `<div class="log-card log-state-card">Failed to load logs: ${escHtml(e.message)}</div>`;
@@ -4446,9 +5257,9 @@ function renderWebappSparkline(id, data) {
 }
 
 function loadWebappDetailSparkline(id) {
+  var el = document.getElementById('detail-wa-sparkline');
+  if (!el) return;
   api('GET', '/api/webapps/' + id + '/results?days=7').then(function (data) {
-    var el = document.getElementById('detail-wa-sparkline');
-    if (!el) return;
     var rts = data.filter(function (d) { return d.response_time_ms != null; }).map(function (d) { return d.response_time_ms; });
     if (rts.length < 2) { el.innerHTML = ''; return; }
     var w = el.offsetWidth || 120;
@@ -4481,25 +5292,23 @@ function renderLogSummary(summary) {
   set('log-error-count', errors);
 }
 
-function renderActivityBar(logs) {
-  const hours = Array.from({ length: 24 }, (_, i) => ({ hour: i, count: 0 }));
-  const now = new Date();
-  const today = now.toISOString().slice(0, 10);
-  logs.forEach(l => {
-    if (l.created_at && l.created_at.startsWith(today)) {
-      const h = new Date(l.created_at).getHours();
-      if (h >= 0 && h < 24) hours[h].count++;
-    }
-  });
-  const max = Math.max(...hours.map(h => h.count), 1);
+async function loadActivityBar() {
   const bars = document.getElementById('activity-bars');
   const labels = document.getElementById('activity-labels');
-  bars.innerHTML = hours.map(h => {
-    const height = Math.max(2, (h.count / max) * 36);
-    const tip = `${h.hour}:00 — ${h.count} event(s)`;
-    return `<div class="activity-bar" style="height:${height}px"><div class="bar-tip">${tip}</div></div>`;
-  }).join('');
-  labels.innerHTML = hours.map((_, i) => i % 3 === 0 ? `<span>${i}:00</span>` : '<span></span>').join('');
+  try {
+    const data = await api('GET', '/api/logs/activity');
+    const hours = data.activity || [];
+    const max = Math.max(...hours.map(h => h.count), 1);
+    bars.innerHTML = hours.map(h => {
+      const height = Math.max(2, (h.count / max) * 36);
+      const tip = `${h.hour}:00 — ${h.count} event(s)`;
+      return `<div class="activity-bar" style="height:${height}px"><div class="bar-tip">${tip}</div></div>`;
+    }).join('');
+    labels.innerHTML = hours.map((_, i) => i % 3 === 0 ? `<span>${i}:00</span>` : '<span></span>').join('');
+  } catch (e) {
+    bars.innerHTML = '';
+    labels.innerHTML = '';
+  }
 }
 
 function logPage(delta) {
@@ -4514,10 +5323,22 @@ function updateLogPagination() {
   if (logState.page > totalPages) logState.page = totalPages;
   const from = logState.total === 0 ? 0 : ((logState.page - 1) * logState.limit) + 1;
   const to = Math.min(logState.page * logState.limit, logState.total);
-  document.getElementById('log-page-info').textContent = `Page ${logState.page} of ${totalPages}`;
-  document.getElementById('log-range-info').textContent = `Showing ${from}-${to} of ${logState.total}`;
+  const pageStr = `Page ${logState.page} of ${totalPages}`;
+  const rangeStr = `Showing ${from}-${to} of ${logState.total}`;
+  document.getElementById('log-page-info').textContent = pageStr;
+  document.getElementById('log-range-info').textContent = rangeStr;
   document.getElementById('log-prev-btn').disabled = logState.page <= 1;
   document.getElementById('log-next-btn').disabled = logState.page >= totalPages;
+  const footer = document.getElementById('log-footer-pagination');
+  if (footer) {
+    footer.style.display = logState.total > logState.limit ? 'flex' : 'none';
+    document.getElementById('log-footer-page-info').textContent = pageStr;
+    document.getElementById('log-footer-range-info').textContent = rangeStr;
+    document.getElementById('log-footer-prev-btn').disabled = logState.page <= 1;
+    document.getElementById('log-footer-next-btn').disabled = logState.page >= totalPages;
+    document.getElementById('log-page-jump-input').value = logState.page;
+    document.getElementById('log-page-jump-input').max = totalPages;
+  }
 }
 
 // ─── Auth ──────────────────────────────────────────────────────
@@ -4544,7 +5365,7 @@ async function checkSession() {
 
 function applyRoleBasedUI() {
   const isViewer = _userRole !== 'admin';
-  document.querySelectorAll('.nav-tab[data-view="settings"], .nav-tab[data-view="logs"], .nav-tab[data-view="backups"]').forEach(tab => {
+  document.querySelectorAll('.sidebar-item[data-view="settings"], .sidebar-item[data-view="logs"], .sidebar-item[data-view="backups"]').forEach(tab => {
     tab.style.display = isViewer ? 'none' : '';
   });
   // Hide mutation buttons on dashboard
@@ -4560,7 +5381,7 @@ function applyRoleBasedUI() {
     btn.style.display = isViewer ? 'none' : '';
   });
   // Hide mutation buttons on webapps view
-  document.querySelectorAll('#view-webapps [data-action="import"], #view-webapps [data-action="check-all-webapps"], #view-webapps [data-action="add-webapp"], #view-webapps [data-action="download-template-webapp"], #view-webapps [data-action="webapp-export-csv"]').forEach(btn => {
+  document.querySelectorAll('#view-webapps [data-action="import"], #view-webapps [data-action="check-all-webapps"], #view-webapps [data-action="add-webapp"], #view-webapps [data-action="download-template-webapp"], #view-webapps [data-action="webapp-export-csv"], #view-webapps [data-action="webapp-export-json"]').forEach(btn => {
     btn.style.display = isViewer ? 'none' : '';
   });
   // Hide bulk toolbars entirely for viewers (no actionable bulk ops)
@@ -4625,10 +5446,20 @@ function applyColumnVisibility(type) {
   if (!table || table.style.display === 'none') return;
   const cols = _visibleCols[type];
   if (Object.keys(cols).length === 0) return;
+  // Toggle colgroup cols to prevent table layout reflow
+  const colgroup = table.querySelector('colgroup');
+  if (colgroup) {
+    colgroup.querySelectorAll('col').forEach(col => {
+      const cls = [...col.classList].find(c => c.startsWith('col-'));
+      if (cls && cols[cls] === false) col.style.display = 'none';
+      else col.style.display = '';
+    });
+  }
+  // Also toggle cell content for accessibility
   table.querySelectorAll('th, td').forEach(cell => {
     const cls = [...cell.classList].find(c => c.startsWith('col-'));
-    if (cls && cols[cls] === false) cell.style.display = 'none';
-    else cell.style.display = '';
+    if (cls && cols[cls] === false) cell.style.visibility = 'collapse';
+    else cell.style.visibility = '';
   });
 }
 
@@ -4755,7 +5586,7 @@ async function bulkAction(type, action) {
 
   if (action === 'delete') {
     if (!confirm(`Delete ${ids.length} domain(s)? This cannot be undone.`)) return;
-    // Animate all selected items simultaneously
+    // Animate all selected items
     const suffix = type === 'ssl_only' ? 'ssl' : 'full';
     ids.forEach(id => {
       const card = document.getElementById(`card-${suffix}-${id}`);
@@ -4765,23 +5596,24 @@ async function bulkAction(type, action) {
         if (row) row.classList.add('removing');
       }
     });
-    // Wait for animation, then optimistically remove from local cache
     await new Promise(r => setTimeout(r, 350));
-    const idSet = new Set(ids);
+    // Fire API calls first, then update cache only on success
+    let failed = 0;
+    const failedIds = [];
+    for (const id of ids) {
+      try { await api('DELETE', `/api/domains/${id}`); } catch { failed++; failedIds.push(id); }
+    }
+    const successIds = ids.filter(id => !failedIds.includes(id));
+    const idSet = new Set(successIds);
     _cachedDomains[type] = (_cachedDomains[type] || []).filter(d => !idSet.has(d.id));
     clearDomainsCache(type);
     sel.clear();
     updateBulkToolbar(type);
     renderDomains(_cachedDomains[type], type);
     renderPagination(type);
-    // Fire API calls in background
-    let failed = 0;
-    for (const id of ids) {
-      try { await api('DELETE', `/api/domains/${id}`); } catch { failed++; }
-    }
     if (failed === 0) toast(`${ids.length} domains deleted`);
-    else toast(`${ids.length - failed} deleted, ${failed} failed`, 'error');
-    try { await api('POST', '/api/logs', { message: `Bulk deleted ${ids.length} domains`, type: 'bulk_delete' }); } catch {}
+    else toast(`${successIds.length} deleted, ${failed} failed`, 'error');
+    try { await api('POST', '/api/logs', { message: `Bulk deleted ${successIds.length} domains`, type: 'bulk_delete' }); } catch {}
     return;
   } else if (action === 'check') {
     _bulkCheckQueue = ids;
@@ -5012,11 +5844,22 @@ document.addEventListener('click', function (e) {
   var list = tab.getAttribute('data-tab');
   document.getElementById('ssl-expiring-list').style.display = list === 'ssl' ? '' : 'none';
   document.getElementById('domain-expiring-list').style.display = list === 'domain' ? '' : 'none';
+  var domainMore = document.getElementById('dash-domain-show-more');
+  if (domainMore) domainMore.style.display = list === 'domain' ? '' : 'none';
 });
 
 // ─── Init ──────────────────────────────────────────────────────
 checkSession().then(() => {
   initTheme();
+  // Restore auto-refresh preference
+  try {
+    var savedRefresh = localStorage.getItem('vigil-auto-refresh');
+    if (savedRefresh) {
+      _autoRefresh = parseInt(savedRefresh) || 0;
+      var sel = document.getElementById('auto-refresh-select');
+      if (sel) sel.value = String(_autoRefresh);
+    }
+  } catch(ex) {}
   _updateSortArrows('full', 'url', 1);
   _updateSortArrows('ssl_only', 'url', 1);
   const viewName = window.location.hash.slice(1) || 'dashboard';

@@ -760,7 +760,12 @@ def check_all():
             logger.warning("Manual check: batch save returned failure — results may be incomplete")
         models.save_check_results_batch(results)
         log_entries = []
+        domain_map_prev = {d['id']: d for d in domains}
         for r in results:
+            if r.get('success'):
+                prev = domain_map_prev.get(r.get('domain_id'))
+                if prev and prev.get('status') == r.get('status') and r.get('status') not in ('expired', 'error'):
+                    continue
             log_type = 'error' if r.get('success') is False else 'check'
             log_msg = f'[run:{run_id}] Check completed for {r["url"]}: {r["status"]}' if r.get('success') else f'[run:{run_id}] Check failed for {r["url"]}: {r.get("error")}'
             log_entries.append((log_type, log_msg, r.get('domain_id'), None, None))
@@ -911,14 +916,16 @@ def _maybe_send_webapp_alert(wa, result, settings, previous_status=None):
         return
 
     settings = settings or models.get_settings()
+    domain_data = dict(wa)
+    domain_data['status_code'] = result.get('status_code')
     try:
-        errors = send_alerts(wa['name'] + ' (' + wa['url'] + ')',
-                             new_status, None, None, settings, domain_data=dict(wa))
+        errors = send_alerts(wa['name'],
+                             new_status, None, None, settings, domain_data=domain_data)
     except Exception as e:
         errors = [str(e)]
     try:
-        we = send_webhook_alerts(wa['name'] + ' (' + wa['url'] + ')',
-                                 new_status, None, None, settings, domain_data=dict(wa))
+        we = send_webhook_alerts(wa['name'],
+                                 new_status, None, None, settings, domain_data=domain_data)
         errors.extend(we)
     except Exception as e:
         errors.append(str(e))
@@ -997,8 +1004,9 @@ def check_all_webapps():
         if wa:
             models.save_webapp_check(wa['id'], r)
             models.save_webapp_check_result(wa['id'], r)
-            models.add_log('webapp_check', f'Auto check: {wa["name"]} - {r["status"]}', username=current_username())
             previous_status = wa.get('status')
+            if not (previous_status == r.get('status') and r.get('status') != 'down'):
+                models.add_log('webapp_check', f'Auto check: {wa["name"]} - {r["status"]}', username=current_username())
             _maybe_send_webapp_alert(wa, r, settings, previous_status)
     return jsonify({'message': f'Checked {len(results)} webapps', 'results': results})
 
@@ -1064,6 +1072,35 @@ def webapp_export_csv():
     resp.headers['Content-Type'] = 'text/csv'
     resp.headers['Content-Disposition'] = 'attachment; filename=webapps.csv'
     return resp
+
+
+@app.route('/api/webapps/export/json', methods=['GET'])
+@admin_required
+def webapp_export_json():
+    apps = models.get_webapps()
+    data = []
+    for a in apps:
+        total = a.get('total_checks', 0) or 1
+        uptime_pct = round((a.get('successful_checks', 0) / total) * 100, 1) if total else 0
+        data.append({
+            'name': a['name'],
+            'url': a['url'],
+            'method': a.get('method', 'GET'),
+            'expected_status': a.get('expected_status'),
+            'expected_body': a.get('expected_body', ''),
+            'timeout': a.get('timeout'),
+            'check_interval': a.get('check_interval'),
+            'status': a.get('status', 'unknown'),
+            'response_time_ms': a.get('response_time_ms', ''),
+            'last_status_code': a.get('last_status_code', ''),
+            'uptime_pct': uptime_pct,
+            'total_checks': a.get('total_checks', 0),
+            'last_checked': a.get('last_checked', ''),
+            'last_error': a.get('last_error', ''),
+            'notes': a.get('notes', ''),
+            'tags': a.get('tags', ''),
+        })
+    return jsonify(data)
 
 
 @app.route('/api/webapps/import', methods=['POST'])
@@ -1234,6 +1271,7 @@ def cert_details(domain_id):
     if not domain:
         return api_error('Domain not found', 404)
     return jsonify({
+        'id': domain['id'],
         'url': domain['url'],
         'ssl_issuer': domain.get('ssl_issuer'),
         'ssl_subject': domain.get('ssl_subject'),
@@ -1241,9 +1279,19 @@ def cert_details(domain_id):
         'ssl_valid_from': domain.get('ssl_valid_from'),
         'ssl_valid_until': domain.get('ssl_valid_until'),
         'ssl_expiry': domain.get('ssl_expiry'),
+        'ssl_days_left': domain.get('ssl_days_left'),
         'ssl_status': domain.get('ssl_status'),
+        'ssl_tls_version': domain.get('ssl_tls_version'),
+        'ssl_cipher': domain.get('ssl_cipher'),
+        'ssl_fingerprint': domain.get('ssl_fingerprint'),
+        'ssl_serial': domain.get('ssl_serial'),
+        'ssl_pem': domain.get('ssl_pem'),
         'status': domain.get('status'),
         'last_checked': domain.get('last_checked'),
+        'notes': domain.get('notes'),
+        'tags': domain.get('tags'),
+        'created_at': domain.get('created_at'),
+        'last_alerted': domain.get('last_alerted'),
     })
 
 
@@ -1401,6 +1449,9 @@ def get_security_settings():
 def update_security_settings():
     data = request.get_json(silent=True) or {}
     models.update_security_settings(data)
+    if 'log_retention_days' in data:
+        models.update_settings({'log_retention_days': data['log_retention_days']})
+        models.prune_logs()
     models.add_log('audit', 'Security settings updated', username=current_username())
     return jsonify({'message': 'Security settings saved'})
 
@@ -1520,11 +1571,22 @@ def get_logs():
     offset = request.args.get('offset', 0, type=int)
     log_type = request.args.get('type', 'all')
     query = request.args.get('q', '').strip()
+    from_date = request.args.get('from_date', '').strip() or None
+    to_date = request.args.get('to_date', '').strip() or None
+    exclude_type = request.args.get('exclude_type', '').strip() or None
     limit = min(limit, 500)
-    logs = models.get_logs(limit=limit, offset=offset, log_type=log_type, query=query)
-    total = models.get_logs_count(log_type=log_type, query=query)
-    summary = models.get_logs_summary(log_type=log_type, query=query)
+    logs = models.get_logs(limit=limit, offset=offset, log_type=log_type, query=query, from_date=from_date, to_date=to_date, exclude_type=exclude_type)
+    total = models.get_logs_count(log_type=log_type, query=query, from_date=from_date, to_date=to_date, exclude_type=exclude_type)
+    summary = models.get_logs_summary(log_type=log_type, query=query, from_date=from_date, to_date=to_date, exclude_type=exclude_type)
     return jsonify({'logs': logs, 'total': total, 'summary': summary})
+
+
+@app.route('/api/logs/activity', methods=['GET'])
+@admin_required
+def get_logs_activity():
+    date = request.args.get('date', '').strip() or None
+    activity = models.get_logs_activity(date)
+    return jsonify({'activity': activity})
 
 
 @app.route('/api/logs', methods=['POST'])
@@ -1537,6 +1599,15 @@ def create_log():
     if message:
         models.add_log(log_type, message, username=current_username())
     return jsonify({'message': 'Logged'})
+
+
+@app.route('/api/logs/clear', methods=['POST'])
+@admin_required
+@csrf_required
+def clear_logs():
+    models.clear_all_logs()
+    models.add_log('audit', 'All logs cleared', username=current_username())
+    return jsonify({'message': 'All logs cleared'})
 
 
 # ─── Backups ───────────────────────────────────────────────────
@@ -1625,6 +1696,27 @@ def download_backup(filename):
     if not backup_path or not os.path.exists(backup_path):
         return api_error('Backup not found')
     return send_file(backup_path, as_attachment=True, download_name=filename)
+
+
+@app.route('/api/backups/bulk-delete', methods=['POST'])
+@admin_required
+@csrf_required
+def bulk_delete_backups():
+    data = request.get_json(silent=True) or {}
+    files = data.get('files', [])
+    if not files or not isinstance(files, list):
+        return api_error('No files specified')
+    deleted = 0
+    for filename in files:
+        backup_path = _safe_backup_path(filename)
+        if not backup_path or not os.path.exists(backup_path):
+            continue
+        meta_path = backup_path + ".meta"
+        os.remove(backup_path)
+        if os.path.exists(meta_path):
+            os.remove(meta_path)
+        deleted += 1
+    return jsonify({'message': f'{deleted} backup(s) deleted'})
 
 
 @app.route('/api/backups/<filename>', methods=['DELETE'])
@@ -1720,6 +1812,22 @@ def reset_email_templates():
     return jsonify({'message': 'Templates reset to defaults'})
 
 
+@app.route('/api/email-templates/<template_name>/restore', methods=['PUT'])
+@admin_required
+@csrf_required
+def restore_email_template(template_name):
+    existing = models.get_settings()
+    custom = existing.get('email_templates', '{}')
+    try:
+        templates = json.loads(custom)
+    except Exception:
+        templates = {}
+    if template_name in templates:
+        del templates[template_name]
+        models.update_settings({'email_templates': json.dumps(templates)})
+    return jsonify({'message': 'Template restored to default'})
+
+
 # ─── Frontend ──────────────────────────────────────────────────
 @app.route('/')
 def login_page():
@@ -1757,7 +1865,12 @@ def check_all_background():
                 logger.warning("Scheduled check: batch save returned failure — results may be incomplete")
             models.save_check_results_batch(results)
             log_entries = []
+            domain_map_prev = {d['id']: d for d in domains}
             for r in results:
+                if r.get('success'):
+                    prev = domain_map_prev.get(r.get('domain_id'))
+                    if prev and prev.get('status') == r.get('status') and r.get('status') not in ('expired', 'error'):
+                        continue
                 log_type = 'error' if r.get('success') is False else 'check'
                 log_msg = f'[run:{run_id}] Check completed for {r["url"]}: {r["status"]}' if r.get('success') else f'[run:{run_id}] Check failed for {r["url"]}: {r.get("error")}'
                 log_entries.append((log_type, log_msg, r.get('domain_id'), None, None))
@@ -1802,6 +1915,7 @@ def check_all_background():
                 logger.warning("Failed to send check summary for run %s: %s", run_id, e)
 
             logger.info("Scheduled check completed for %d domains (run %s)", len(domains), run_id)
+            models.prune_logs()
     except Exception as e:
         logger.error(f"Scheduled check failed: {e}")
     finally:
@@ -1833,9 +1947,11 @@ def check_webapps_background():
                     if wa:
                         models.save_webapp_check(wa['id'], r)
                         models.save_webapp_check_result(wa['id'], r)
-                        models.add_log('webapp_check', f'Auto check: {wa["name"]} - {r["status"]}')
                         previous_status = wa.get('status')
+                        if not (previous_status == r.get('status') and r.get('status') != 'down'):
+                            models.add_log('webapp_check', f'Auto check: {wa["name"]} - {r["status"]}')
                         _maybe_send_webapp_alert(wa, r, settings, previous_status)
+            models.prune_logs()
             logger.info("Scheduled webapp check: %d checked, %d due", len(due), len(due))
     except Exception as e:
         logger.error(f"Scheduled webapp check failed: {e}")

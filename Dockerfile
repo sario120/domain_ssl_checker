@@ -50,4 +50,7 @@ USER vigil
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--workers", "1", "--threads", "4", "--bind", "0.0.0.0:5000", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "-c", "gunicorn.conf.py", "app:app"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD curl -f http://localhost:5000/api/health || exit 1
+
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "app:app"]

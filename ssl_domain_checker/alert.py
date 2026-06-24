@@ -78,6 +78,8 @@ def _build_alert_variables(domain_name, status, ssl_days_left, domain_days_left,
         "domain_expiry": d.get("domain_expiry", "N/A"),
         "issuer": d.get("ssl_issuer", "N/A"),
         "registrar": d.get("manual_registrar", d.get("domain_registrar", "N/A")),
+        "url": d.get("url", "N/A"),
+        "status_code": str(d.get("status_code", "N/A")),
         "date": models.to_local_time(models.timezone_now_str()),
     }
 

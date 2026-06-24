@@ -10,15 +10,11 @@
 <body>
 <div id="app">
   <nav class="navbar">
-    <div class="nav-brand" data-action="go-dashboard"><img src="/static/logo20.png" alt="Logo" style="height:28px;vertical-align:middle;margin-right:8px;border-radius:6px;cursor:pointer;">Vigil</div>
-    <div class="nav-tabs">
-      <button class="nav-tab active" data-view="dashboard">Dashboard</button>
-      <button class="nav-tab" data-view="domains">Domains</button>
-      <button class="nav-tab" data-view="sslcerts">SSL Certs</button>
-      <button class="nav-tab" data-view="webapps">Web Apps</button>
-      <button class="nav-tab" data-view="backups">Backups</button>
-      <button class="nav-tab" data-view="settings">Settings</button>
-      <button class="nav-tab" data-view="logs">Logs</button>
+    <div class="nav-left">
+      <button class="sidebar-toggle" data-action="toggle-sidebar" aria-label="Toggle navigation">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <div class="nav-brand" data-action="go-dashboard"><img src="/static/logo20.png" alt="Logo" style="height:28px;border-radius:6px;cursor:pointer;">Vigil</div>
     </div>
     <div class="nav-right">
       <button class="theme-toggle" data-action="toggle-theme" title="Toggle theme">
@@ -30,19 +26,59 @@
     </div>
   </nav>
 
+  <aside class="sidebar" id="sidebar">
+    <button class="sidebar-collapse-btn" data-action="toggle-sidebar-collapse" title="Collapse sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
+    <nav class="sidebar-nav">
+      <div class="sidebar-group-label">Monitoring</div>
+      <button class="sidebar-item active" data-view="dashboard" title="Dashboard">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        <span>Dashboard</span>
+      </button>
+      <button class="sidebar-item" data-view="domains" title="Domains">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span>Domains</span>
+      </button>
+      <button class="sidebar-item" data-view="sslcerts" title="SSL Certs">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 1 1 8 0v4"/></svg>
+        <span>SSL Certs</span>
+      </button>
+      <button class="sidebar-item" data-view="webapps" title="Web Apps">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <span>Web Apps</span>
+      </button>
+      <div class="sidebar-group-label">System</div>
+      <button class="sidebar-item" data-view="backups" title="Backups">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        <span>Backups</span>
+      </button>
+      <button class="sidebar-item" data-view="settings" title="Settings">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Settings</span>
+      </button>
+      <button class="sidebar-item" data-view="logs" title="Logs">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span>Logs</span>
+      </button>
+    </nav>
+  </aside>
+  <div class="sidebar-overlay" id="sidebar-overlay" data-action="close-sidebar"></div>
+
   <main class="container">
     <!-- Dashboard View -->
     <section id="view-dashboard" class="view active">
       <div class="view-header">
         <h2>Dashboard <span class="dash-counts" id="dash-counts"></span></h2>
         <div class="header-actions">
+          <input type="text" id="dash-search" class="dash-search-input" placeholder="Search domains, webapps..." style="display:none">
           <select id="auto-refresh-select" class="auto-refresh-select">
             <option value="0">No refresh</option>
             <option value="30">30s</option>
             <option value="60">60s</option>
           </select>
-          <button class="btn btn-secondary" data-action="check-all-full">Check All Domains</button>
-          <button class="btn btn-secondary" data-action="check-all-ssl">Check All SSL</button>
+          <button class="btn btn-secondary" data-action="check-all-full" id="btn-check-all-full">Check All Domains</button>
+          <button class="btn btn-secondary" data-action="check-all-ssl" id="btn-check-all-ssl">Check All SSL</button>
           <button class="btn btn-secondary" data-action="export-csv">Export CSV</button>
         </div>
       </div>
@@ -56,6 +92,7 @@
         <div class="dash-strip-item">
           <span class="dash-strip-label">Open issues</span>
           <strong class="dash-strip-value" id="hero-issue-count">0</strong>
+          <span class="dash-strip-sublabel" id="hero-issue-breakdown"></span>
         </div>
         <div class="dash-strip-divider"></div>
         <div class="dash-strip-item dash-strip-scheduler">
@@ -65,22 +102,27 @@
             <span id="scheduler-text">Loading...</span>
           </span>
         </div>
+        <div class="dash-strip-item" id="hero-check-duration-item" style="display:none">
+          <span class="dash-strip-label">Last run</span>
+          <strong class="dash-strip-value" id="hero-check-duration">—</strong>
+        </div>
         <div class="dash-strip-fill"></div>
         <div class="dash-strip-item">
           <span class="dash-strip-refreshed" id="last-refreshed"></span>
         </div>
       </div>
 
-      <div id="dash-changed" class="dash-changed"></div>
+      <div id="dash-changed" class="dash-changed" aria-live="polite"></div>
 
       <div class="dash-layout">
         <div class="dash-main">
           <div class="dash-empty" id="dash-empty" style="display:none">
             <div class="empty-state">
               <h3>Welcome to Vigil</h3>
-              <p>Add your first domain to start monitoring SSL certificates and domain expirations.</p>
+              <p>Add domains to monitor SSL certificates and domain expirations, or add web apps to monitor HTTP status and response times.</p>
               <div class="empty-actions">
                 <button class="btn btn-primary" data-action="toggle-quickadd">Add a Domain</button>
+                <button class="btn btn-secondary" data-action="add-webapp">Add a Web App</button>
               </div>
             </div>
           </div>
@@ -114,7 +156,7 @@
                 <div class="dash-stat pending" data-action="filter-domains" data-type="ssl_only" data-status="pending"><span class="dash-num" id="dash-ssl-pending">0</span> Pending</div>
               </div>
             </div>
-            <div class="dash-card" style="cursor:pointer" data-action="go-webapps">
+            <div class="dash-card" id="dash-webapp-card" style="cursor:pointer" data-action="go-webapps">
               <div class="dash-card-header">
                 <span>Web Apps</span>
                 <span class="dash-card-pct" id="dash-webapp-health-pct">—</span>
@@ -126,6 +168,8 @@
                 <div class="dash-stat warning"><span class="dash-num" id="dash-webapp-slow">0</span> Slow</div>
                 <div class="dash-stat pending"><span class="dash-num" id="dash-webapp-unknown">0</span> Unknown</div>
                 <div class="dash-stat" style="opacity:0.6"><span class="dash-num" id="dash-webapp-paused">0</span> Paused</div>
+                <div class="dash-stat" id="dash-webapp-rt-row" style="display:none"><span class="dash-num" id="dash-webapp-avg-rt">—</span> avg response</div>
+                <div class="dash-sparkline" id="dash-webapp-sparkline"></div>
               </div>
             </div>
           </div>
@@ -148,7 +192,8 @@
           <div class="dash-sidebar-card" id="dash-webapp-failures">
             <div class="sparkline-header collapsible-header" data-collapse="wa-failures">
               <span class="collapse-arrow">&#9660;</span>
-              <h4>Web App Issues</h4>
+              <h4>Web App Issues <span class="dash-sidebar-badge" id="wa-failure-count"></span></h4>
+              <span class="dash-sidebar-uptime" id="wa-sidebar-uptime"></span>
             </div>
             <div class="collapsible-body"><div class="top-list" id="webapp-failures-list"></div></div>
           </div>
@@ -165,6 +210,8 @@
               </div>
               <div class="top-list" id="ssl-expiring-list"></div>
               <div class="top-list" id="domain-expiring-list" style="display:none"></div>
+              <div class="top-list-show-more"><a href="#" data-action="dash-show-more-expiry" data-tab="ssl">View all expiring SSL &rarr;</a></div>
+              <div class="top-list-show-more" id="dash-domain-show-more" style="display:none"><a href="#" data-action="dash-show-more-expiry" data-tab="domain">View all expiring domains &rarr;</a></div>
             </div>
           </div>
         </div>
@@ -242,19 +289,24 @@
 
       <div class="stats-bar">
         <div class="stat total"><span class="stat-count" id="stat-full-total">0</span> Total</div>
-        <div class="stat healthy"><span class="stat-count" id="stat-full-healthy">0</span> Healthy (&gt;90d)</div>
-        <div class="stat warning"><span class="stat-count" id="stat-full-warning">0</span> Watch (&lt;90d)</div>
+        <div class="stat healthy"><span class="stat-count" id="stat-full-healthy">0</span> Healthy</div>
+        <div class="stat watch"><span class="stat-count" id="stat-full-watch">0</span> Watch</div>
+        <div class="stat caution"><span class="stat-count" id="stat-full-caution">0</span> Caution</div>
+        <div class="stat warning"><span class="stat-count" id="stat-full-warning">0</span> Warning</div>
+        <div class="stat critical"><span class="stat-count" id="stat-full-critical">0</span> Critical</div>
         <div class="stat danger"><span class="stat-count" id="stat-full-danger">0</span> Expired</div>
         <div class="stat pending"><span class="stat-count" id="stat-full-pending">0</span> Pending</div>
         <div class="stat error"><span class="stat-count" id="stat-full-error">0</span> Error</div>
       </div>
       <div id="domain-list-full" class="domain-list"></div>
-      <table id="domain-table-full" class="domain-table" style="display:none">
+      <div class="domain-table-wrapper"><table id="domain-table-full" class="domain-table" style="display:none;table-layout:fixed">
+        <colgroup><col class="col-checkbox"><col class="col-domain"><col class="col-status"><col class="col-domain-exp"><col class="col-ssl-exp"><col class="col-registrar"><col class="col-checked"><col class="col-actions"></colgroup>
         <thead><tr><th class="col-checkbox"></th><th class="col-domain" data-sort="url" data-type="full">Domain <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-status" data-sort="status" data-type="full">Status <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-domain-exp" data-sort="days" data-type="full">Domain Expiry <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-ssl-exp" data-sort="days" data-type="full">SSL Expiry <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-registrar" data-sort="registrar" data-type="full">Registrar <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-checked" data-sort="checked" data-type="full">Last Checked <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-actions">Actions</th></tr></thead>
         <tbody id="domain-table-body-full"></tbody>
-      </table>
+      </table></div>
       <div class="pagination-wrapper" id="pagination-full" style="display:none">
         <div class="pagination-info">Showing <span id="page-from-full">0</span>-<span id="page-to-full">0</span> of <span id="page-total-full">0</span></div>
+        <div class="risk-bar" id="risk-bar-full"><div class="risk-bar-segment healthy"></div><div class="risk-bar-segment watch"></div><div class="risk-bar-segment caution"></div><div class="risk-bar-segment warning"></div><div class="risk-bar-segment critical"></div><div class="risk-bar-segment expired"></div><div class="risk-bar-segment error"></div><div class="risk-bar-segment pending"></div></div>
         <div class="pagination-controls">
           <button class="btn btn-sm btn-secondary" data-action="page-first-full" id="page-first-full">&#171;</button>
           <button class="btn btn-sm btn-secondary" data-action="page-prev-full" id="page-prev-full">&#8249;</button>
@@ -350,18 +402,23 @@
       <div class="stats-bar">
         <div class="stat total"><span class="stat-count" id="stat-ssl-total">0</span> Total</div>
         <div class="stat healthy"><span class="stat-count" id="stat-ssl-healthy">0</span> Healthy</div>
-        <div class="stat warning"><span class="stat-count" id="stat-ssl-warning">0</span> Watch (≤30d)</div>
+        <div class="stat watch"><span class="stat-count" id="stat-ssl-watch">0</span> Watch</div>
+        <div class="stat caution"><span class="stat-count" id="stat-ssl-caution">0</span> Caution</div>
+        <div class="stat warning"><span class="stat-count" id="stat-ssl-warning">0</span> Warning</div>
+        <div class="stat critical"><span class="stat-count" id="stat-ssl-critical">0</span> Critical</div>
         <div class="stat danger"><span class="stat-count" id="stat-ssl-danger">0</span> Expired</div>
         <div class="stat pending"><span class="stat-count" id="stat-ssl-pending">0</span> Pending</div>
         <div class="stat error"><span class="stat-count" id="stat-ssl-error">0</span> Error</div>
       </div>
       <div id="domain-list-ssl" class="domain-list"></div>
-      <table id="domain-table-ssl" class="domain-table" style="display:none">
+      <div class="domain-table-wrapper"><table id="domain-table-ssl" class="domain-table" style="display:none;table-layout:fixed">
+        <colgroup><col class="col-checkbox"><col class="col-domain"><col class="col-status"><col class="col-ssl-exp"><col class="col-issuer"><col class="col-checked"><col class="col-actions"></colgroup>
         <thead><tr><th class="col-checkbox"></th><th class="col-domain" data-sort="url" data-type="ssl_only">Domain <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-status" data-sort="status" data-type="ssl_only">Status <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-ssl-exp" data-sort="days" data-type="ssl_only">SSL Expiry <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-issuer" data-sort="issuer" data-type="ssl_only">Issuer <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-checked" data-sort="checked" data-type="ssl_only">Last Checked <span class="sort-arrow"></span><span class="col-resize-handle"></span></th><th class="col-actions">Actions</th></tr></thead>
         <tbody id="domain-table-body-ssl"></tbody>
-      </table>
+      </table></div>
       <div class="pagination-wrapper" id="pagination-ssl" style="display:none">
         <div class="pagination-info">Showing <span id="page-from-ssl">0</span>-<span id="page-to-ssl">0</span> of <span id="page-total-ssl">0</span></div>
+        <div class="risk-bar" id="risk-bar-ssl"><div class="risk-bar-segment healthy"></div><div class="risk-bar-segment watch"></div><div class="risk-bar-segment caution"></div><div class="risk-bar-segment warning"></div><div class="risk-bar-segment critical"></div><div class="risk-bar-segment expired"></div><div class="risk-bar-segment error"></div><div class="risk-bar-segment pending"></div></div>
         <div class="pagination-controls">
           <button class="btn btn-sm btn-secondary" data-action="page-first-ssl" id="page-first-ssl">&#171;</button>
           <button class="btn btn-sm btn-secondary" data-action="page-prev-ssl" id="page-prev-ssl">&#8249;</button>
@@ -399,6 +456,7 @@
             <div class="actions-dropdown-content" role="menu" tabindex="-1">
               <button role="menuitem" data-action="check-all-webapps"><span class="dropdown-item-icon">&#x21bb;</span><span class="dropdown-item-label">Check All</span></button>
               <button role="menuitem" data-action="webapp-export-csv"><span class="dropdown-item-icon">&#x2197;</span><span class="dropdown-item-label">Export CSV</span></button>
+              <button role="menuitem" data-action="webapp-export-json"><span class="dropdown-item-icon">&#x2197;</span><span class="dropdown-item-label">Export JSON</span></button>
               <hr class="actions-divider" role="separator">
               <button role="menuitem" data-action="import"><span class="dropdown-item-icon">&#x21E7;</span><span class="dropdown-item-label">Import</span></button>
             </div>
@@ -469,10 +527,10 @@
 
       <div id="webapp-list" class="domain-list"></div>
       <div id="webapp-skeleton" class="domain-list" style="display:none"></div>
-      <table id="webapp-table" class="domain-table" style="display:none">
+      <div class="domain-table-wrapper"><table id="webapp-table" class="domain-table" style="display:none">
         <thead><tr><th class="col-checkbox"></th><th class="col-name" data-sort="name" data-type="webapp">Name <span class="sort-arrow"></span></th><th class="col-url" data-sort="url" data-type="webapp">URL <span class="sort-arrow"></span></th><th class="col-status" data-sort="status" data-type="webapp">Status <span class="sort-arrow"></span></th><th class="col-response" data-sort="response_time" data-type="webapp">Response Time <span class="sort-arrow"></span></th><th class="col-code" data-sort="code" data-type="webapp">Status Code <span class="sort-arrow"></span></th><th class="col-uptime" data-sort="uptime_pct" data-type="webapp">Uptime % <span class="sort-arrow"></span></th><th class="col-sparkline">Activity</th><th class="col-checked" data-sort="checked" data-type="webapp">Last Checked <span class="sort-arrow"></span></th><th class="col-actions">Actions</th></tr></thead>
         <tbody id="webapp-table-body"></tbody>
-      </table>
+      </table></div>
       <div class="pagination-wrapper" id="pagination-webapp" style="display:none">
         <div class="pagination-info">Showing <span id="page-from-webapp">0</span>-<span id="page-to-webapp">0</span> of <span id="page-total-webapp">0</span></div>
         <div class="pagination-controls">
@@ -725,6 +783,19 @@
             <div class="form-row checkbox-row">
               <label><input type="checkbox" id="require_special"> Require special character (!@#$%^&*)</label>
             </div>
+            <div class="pw-policy-test">
+              <label for="pw-policy-test-input">Test a password against this policy</label>
+              <input type="text" id="pw-policy-test-input" placeholder="Type a password to test..." class="pw-policy-test-input">
+              <div class="pw-policy-test-results" id="pw-policy-test-results"></div>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Logs</legend>
+            <div class="form-row">
+              <label for="log_retention_days">Log Retention (days)</label>
+              <input type="number" id="log_retention_days" value="90" min="1" max="3650">
+              <span class="field-hint">Auto-delete logs older than this many days (0 = keep forever). Pruned during scheduled checks.</span>
+            </div>
           </fieldset>
           <div class="form-actions">
             <button type="button" class="btn btn-secondary" data-action="reset-security" title="Reset to defaults">Reset</button>
@@ -754,7 +825,7 @@
         <div class="pane-header">
           <div>
             <h3>Email Templates</h3>
-            <p class="pane-subtitle">Customize the messages sent for SSL, domain, and check-summary notifications.</p>
+            <p class="pane-subtitle">Customize the messages sent for SSL, domain, webapp, and check-summary notifications.</p>
           </div>
           <div class="header-actions">
             <button class="btn btn-secondary" data-action="refresh-email-templates">Refresh</button>
@@ -764,13 +835,14 @@
         <div class="email-tpl-tabs" id="email-tpl-tabs">
           <button class="email-tpl-tab active" data-tpl="ssl_alert">SSL Alert</button>
           <button class="email-tpl-tab" data-tpl="domain_alert">Domain Alert</button>
+          <button class="email-tpl-tab" data-tpl="webapp_alert">Web App Alert</button>
           <button class="email-tpl-tab" data-tpl="check_complete">Check Complete</button>
         </div>
         <form id="email-tpl-form" class="settings-form email-template-form">
           <div class="form-row">
             <label for="email-tpl-subject">Subject</label>
             <input type="text" id="email-tpl-subject">
-            <span class="field-hint">Variables: {domain}, {status}, {ssl_days_left}, {domain_days_left}, {ssl_expiry}, {domain_expiry}, {issuer}, {registrar}, {date}, {total}, {healthy}, {warning}, {expired}</span>
+            <span class="field-hint" id="email-tpl-vars"></span>
           </div>
           <div class="form-row">
             <label for="email-tpl-html">HTML Body</label>
@@ -782,6 +854,7 @@
           </div>
           <div class="form-actions">
             <button type="button" class="btn btn-secondary" data-action="preview-email-tpl">Preview</button>
+            <button type="button" class="btn btn-secondary" data-action="restore-email-tpl">Restore Default</button>
             <button type="submit" class="btn btn-primary" id="btn-save-template">Save Template</button>
           </div>
         </form>
@@ -805,7 +878,7 @@
         </div>
         <div class="header-actions">
           <button class="btn btn-secondary" data-action="refresh-backups-view">Refresh</button>
-          <button class="btn btn-primary" data-action="create-backup-view">Create Backup</button>
+          <button class="btn btn-primary" data-action="create-backup-view" id="btn-create-backup">Create Backup</button>
         </div>
       </div>
 
@@ -876,17 +949,57 @@
         </div>
       </div>
 
-      <!-- Backup list header actions -->
-      <div class="backup-list-actions" style="display:flex;justify-content:space-between;align-items:center;margin:12px 0;flex-wrap:wrap;gap:8px;">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <!-- Restore Confirmation Pane -->
+      <div class="backup-restore-pane" id="backup-restore-pane" style="display:none">
+        <div class="card">
+          <div class="card-header">
+            <h3>Confirm Database Restore</h3>
+            <button class="btn btn-sm btn-secondary" data-action="close-backup-restore">Cancel</button>
+          </div>
+          <div class="card-body">
+            <p class="restore-warning">This will replace the current database with the selected backup snapshot. A pre-restore backup will be created automatically.</p>
+            <div class="form-row">
+              <label>Backup file</label>
+              <div class="restore-filename-display" id="restore-filename-display"></div>
+            </div>
+            <div class="form-row">
+              <label for="restore-confirm-input">Type the filename above to confirm</label>
+              <input type="text" id="restore-confirm-input" placeholder="Type the filename to confirm..." autocomplete="off" autocorrect="off" spellcheck="false">
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-danger" data-action="confirm-restore-backup">Restore Database</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Backup list toolbar -->
+      <div class="backup-list-toolbar">
+        <div class="backup-list-toolbar-left">
           <button class="btn btn-sm btn-secondary" data-action="open-backup-create">+ New Backup</button>
           <button class="btn btn-sm btn-secondary" data-action="open-backup-upload">Upload &amp; Restore</button>
           <button class="btn btn-sm btn-secondary" data-action="toggle-backup-schedule">Schedule</button>
+          <button class="btn btn-sm btn-danger" data-action="delete-selected-backups" id="btn-delete-selected-backups" style="display:none">Delete Selected</button>
         </div>
-        <span class="backup-count" id="backup-count-label"></span>
+        <div class="backup-list-toolbar-right">
+          <input type="search" id="backup-search" placeholder="Search backups..." class="backup-search-input">
+          <span class="backup-count" id="backup-count-label"></span>
+        </div>
       </div>
 
       <div class="backups-list" id="backups-view-list"></div>
+
+      <div class="backup-pagination" id="backup-pagination" style="display:none">
+        <span id="backup-page-info" class="backup-page-info"></span>
+        <div class="backup-pagination-controls">
+          <button class="btn btn-sm" data-action="backup-prev" id="backup-prev-btn">Prev</button>
+          <button class="btn btn-sm" data-action="backup-next" id="backup-next-btn">Next</button>
+          <span class="backup-page-jump-sep">|</span>
+          <span class="backup-page-jump-label">Page</span>
+          <input type="number" id="backup-page-jump-input" class="backup-page-jump-input" min="1" value="1">
+          <button class="btn btn-sm btn-secondary" data-action="backup-jump">Go</button>
+        </div>
+      </div>
     </section>
 
     <!-- Logs View -->
@@ -910,6 +1023,7 @@
             <button class="btn btn-sm" data-action="log-next" id="log-next-btn">Next</button>
           </div>
           <button class="btn btn-secondary" data-action="refresh-logs">Refresh</button>
+          <button class="btn btn-danger" data-action="clear-logs" title="Delete all logs">Clear Logs</button>
         </div>
       </div>
       <div class="log-summary" id="log-summary">
@@ -920,6 +1034,12 @@
         <div class="log-summary-card"><span id="log-webapp-alert-count">0</span>Web Alerts</div>
         <div class="log-summary-card attention"><span id="log-error-count">0</span>Errors</div>
       </div>
+      <div class="log-date-range">
+        <input type="date" id="log-from-date" class="log-date-input" title="From date">
+        <span class="log-date-sep">–</span>
+        <input type="date" id="log-to-date" class="log-date-input" title="To date">
+        <button class="btn btn-sm btn-secondary" id="log-date-clear" data-action="clear-log-dates" title="Clear date range">Clear</button>
+      </div>
       <div class="log-filters" id="log-filters">
         <button class="log-filter active" data-log-filter="all">All</button>
         <button class="log-filter" data-log-filter="check">Checks</button>
@@ -928,15 +1048,16 @@
         <button class="log-filter" data-log-filter="alert">Alerts</button>
         <button class="log-filter" data-log-filter="error">Errors</button>
         <button class="log-filter" data-log-filter="info">Info</button>
-        <button class="log-filter" data-log-filter="settings_change">Settings</button>
+        <button class="log-filter" data-log-filter="audit">Settings</button>
+        <button class="btn btn-sm log-exclude-toggle" id="log-exclude-toggle" title="Toggle exclude mode" data-exclude="false">⊕</button>
       </div>
       <div class="log-activity">
         <div class="log-activity-header">
-          <h4>Current Page Activity</h4>
+          <h4>Today's Activity</h4>
           <span id="log-range-info">Showing 0 logs</span>
         </div>
         <div class="activity-bars" id="activity-bars"></div>
-        <div class="activity-labels" id="activity-labels"></div>
+        <div class="activity-labels" id="activity-labels">        </div>
       </div>
       <div class="log-table-wrapper">
         <table id="log-table">
@@ -945,6 +1066,18 @@
         </table>
       </div>
       <div class="log-mobile" id="log-mobile"></div>
+      <div class="log-footer-pagination" id="log-footer-pagination">
+        <span id="log-footer-range-info"></span>
+        <div class="log-footer-controls">
+          <button class="btn btn-sm" data-action="log-prev" id="log-footer-prev-btn">Prev</button>
+          <span id="log-footer-page-info" class="log-page-info"></span>
+          <button class="btn btn-sm" data-action="log-next" id="log-footer-next-btn">Next</button>
+          <span class="log-page-jump-sep">|</span>
+          <span class="log-page-jump-label">Page</span>
+          <input type="number" id="log-page-jump-input" class="log-page-jump-input" min="1" value="1">
+          <button class="btn btn-sm btn-secondary" data-action="log-jump">Go</button>
+        </div>
+      </div>
     </section>
   </main>
 
@@ -1074,8 +1207,16 @@
         <h3>Certificate Details</h3>
         <button class="modal-close" data-action="close-cert-modal">&times;</button>
       </div>
+      <div id="cert-status-bar" style="display:none;margin-bottom:12px;align-items:center;gap:12px;flex-wrap:wrap">
+        <span class="cert-status-badge" id="cert-status-badge"></span>
+        <div class="cert-expiry-bar" style="flex:1;min-width:100px"><div class="cert-expiry-bar-fill" id="cert-expiry-bar-fill"></div></div>
+      </div>
       <div id="cert-details" class="cert-details">
-        <div class="cert-loading">Loading...</div>
+        <div class="cert-loading"><span class="detail-loading">Loading...</span></div>
+      </div>
+      <div id="cert-modal-footer" class="cert-modal-footer" style="display:none;margin-top:16px;padding-top:12px;border-top:1px solid var(--border);align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <span class="cert-last-checked" id="cert-last-checked"></span>
+        <button class="btn btn-sm btn-primary" data-action="cert-check-now" id="cert-check-now-btn">&#x21bb; Check Now</button>
       </div>
     </div>
   </div>
@@ -1296,8 +1437,9 @@
         </div>
 
         <!-- Recent checks stat -->
-        <div class="detail-recent-checks" style="display:flex;gap:16px;padding:8px 0;font-size:13px">
+        <div class="detail-recent-checks" style="display:flex;gap:16px;padding:8px 0;font-size:13px;flex-wrap:wrap">
           <span>Last 25 checks: <strong id="detail-wa-recent-checks">—</strong></span>
+          <span>Status Code: <strong id="detail-wa-status-code">—</strong></span>
         </div>
 
         <!-- Uptime grid -->

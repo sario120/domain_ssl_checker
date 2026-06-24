@@ -19,7 +19,7 @@ Tech: Flask + SQLite (WAL mode) + APScheduler + vanilla JS frontend.
 - URL normalization via `normalise_url()` in `models.py` — auto-prepends `https://` for DNS names, `http://` for IPs/localhost/single-word hosts.
 
 ### Frontend
-- **No framework** — vanilla JS in `static/app.js` (~5032 lines), `static/login.js` (136 lines).
+- **No framework** — vanilla JS in `static/app.js` (~5864 lines), `static/login.js` (138 lines).
 - **Hash-based routing** — `window.location.hash` drives view switching.
 - **Dark/light theme** — toggled via `localStorage`, class on `<body>`.
 - **Event delegation** — all click actions handled via single `data-action` attribute listener.
@@ -92,4 +92,4 @@ Tech: Flask + SQLite (WAL mode) + APScheduler + vanilla JS frontend.
 4. View mode toggling, stats bar, pagination, group-by-status all follow existing patterns — refer to `renderDomainCards()`, `renderDomainTable()`, `updateStats()`, `renderPagination()`, `renderSortBar()`.
 
 ### Known Bug Patterns
-- Webapp alerts calling `send_alerts()` with `ssl_days_left=None, domain_days_left=None` — `_send_smtp()` in `alert.py` must detect this and use `"webapp_alert"` template, not fall through to `"domain_alert"`.
+- (none currently — `_send_smtp()` in `alert.py` correctly checks for `ssl_days_left=None and domain_days_left=None` and uses `"webapp_alert"` template.)

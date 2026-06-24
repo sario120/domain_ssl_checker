@@ -1,27 +1,33 @@
 [Unit]
-Description=Vigil SSL & Domain Expiry Monitor
-After=network.target
+Description=Vigil — SSL, Domain & Web App Monitoring Service
+Documentation=https://github.com/anomalyco/opencode
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=www-data
-Group=www-data
+User=vigil
+Group=vigil
 WorkingDirectory=/opt/ssl_checker
 EnvironmentFile=/opt/ssl_checker/.env
-ExecStart=/opt/ssl_checker/venv/bin/gunicorn \
-    --workers 1 --threads 4 \
-    --bind 127.0.0.1:5000 \
-    --timeout 120 \
-    --access-logfile /opt/ssl_checker/data_volume/access.log \
-    --error-logfile /opt/ssl_checker/data_volume/error.log \
-    --chdir /opt/ssl_checker/ssl_domain_checker \
-    app:app
+ExecStart=/opt/ssl_checker/venv/bin/gunicorn -c /opt/ssl_checker/gunicorn.conf.py app:app
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
-RestartSec=5
+RestartSec=10
 TimeoutStopSec=30
 KillMode=mixed
+KillSignal=SIGTERM
 LimitNOFILE=65536
+LimitNPROC=4096
+MemoryMax=1G
+CPUQuota=100%
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/opt/ssl_checker/data_volume /opt/ssl_checker/backups /opt/ssl_checker/.env
 
 [Install]
 WantedBy=multi-user.target

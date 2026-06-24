@@ -7,6 +7,17 @@ _app_pkg = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 if _app_pkg not in sys.path:
     sys.path.insert(0, _app_pkg)
 
+workers = 1
+threads = 4
+bind = "0.0.0.0:" + os.environ.get("PORT", "5000")
+timeout = 120
+accesslog = "-"
+errorlog = "-"
+worker_class = "gthread"
+graceful_timeout = 30
+max_requests = 10000
+max_requests_jitter = 1000
+
 
 def post_worker_init(worker):
     """Called once per worker after the app is fully loaded."""

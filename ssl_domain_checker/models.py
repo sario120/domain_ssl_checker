@@ -156,7 +156,9 @@ CREATE TABLE IF NOT EXISTS domains (
     domain_status TEXT DEFAULT 'pending', domain_registrar TEXT,
     status TEXT DEFAULT 'pending', last_checked TEXT,
     notes TEXT, ssl_alert_threshold INTEGER, domain_alert_threshold INTEGER,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP, last_alerted TEXT
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP, last_alerted TEXT,
+    ssl_tls_version TEXT, ssl_cipher TEXT, ssl_fingerprint TEXT, ssl_serial TEXT,
+    ssl_pem TEXT
 );
 CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -297,7 +299,9 @@ CREATE TABLE IF NOT EXISTS domains (
     domain_status TEXT DEFAULT 'pending', domain_registrar TEXT,
     status TEXT DEFAULT 'pending', last_checked TEXT,
     notes TEXT, ssl_alert_threshold INTEGER, domain_alert_threshold INTEGER,
-    created_at TIMESTAMPTZ DEFAULT NOW(), last_alerted TIMESTAMPTZ
+    created_at TIMESTAMPTZ DEFAULT NOW(), last_alerted TIMESTAMPTZ,
+    ssl_tls_version TEXT, ssl_cipher TEXT, ssl_fingerprint TEXT, ssl_serial TEXT,
+    ssl_pem TEXT
 );
 CREATE TABLE IF NOT EXISTS settings (
     id BIGSERIAL PRIMARY KEY,
@@ -431,11 +435,13 @@ CREATE INDEX IF NOT EXISTS idx_webapp_results_app ON webapp_results(webapp_id, c
 _MIGRATION_DOMAIN_COLS = frozenset({
     'ssl_alert_threshold', 'domain_alert_threshold', 'notes', 'manual_expiry_date',
     'check_interval', 'manual_registrar', 'last_alerted', 'tags', 'ssl_fingerprint',
+    'ssl_tls_version', 'ssl_cipher', 'ssl_serial', 'ssl_pem',
 })
 _MIGRATION_SETTINGS_COLS = frozenset({
     'last_summary_sent', 'slack_webhook_url', 'slack_enabled',
     'zulip_webhook_url', 'zulip_enabled',
     'backup_schedule_hour', 'backup_schedule_minute', 'max_backups',
+    'log_retention_days',
 })
 
 
@@ -453,6 +459,10 @@ def _run_sqlite_migrations():
         ('manual_expiry_date', 'ALTER TABLE domains ADD COLUMN manual_expiry_date TEXT'),
         ('tags', 'ALTER TABLE domains ADD COLUMN tags TEXT DEFAULT ""'),
         ('ssl_fingerprint', 'ALTER TABLE domains ADD COLUMN ssl_fingerprint TEXT'),
+        ('ssl_tls_version', 'ALTER TABLE domains ADD COLUMN ssl_tls_version TEXT'),
+        ('ssl_cipher', 'ALTER TABLE domains ADD COLUMN ssl_cipher TEXT'),
+        ('ssl_serial', 'ALTER TABLE domains ADD COLUMN ssl_serial TEXT'),
+        ('ssl_pem', 'ALTER TABLE domains ADD COLUMN ssl_pem TEXT'),
         ('check_interval', 'ALTER TABLE domains ADD COLUMN check_interval INTEGER DEFAULT 360'),
         ('slack_webhook_url', 'ALTER TABLE settings ADD COLUMN slack_webhook_url TEXT DEFAULT ""'),
         ('slack_enabled', 'ALTER TABLE settings ADD COLUMN slack_enabled INTEGER DEFAULT 0'),
@@ -485,11 +495,11 @@ def _run_sqlite_migrations():
     if "client_ip" not in lcols:
         conn.execute("ALTER TABLE logs ADD COLUMN client_ip TEXT")
     scols = {r[1] for r in conn.execute("PRAGMA table_info(settings)").fetchall()}
-    for col in ("last_summary_sent", "backup_schedule_hour", "backup_schedule_minute", "max_backups"):
+    for col in ("last_summary_sent", "backup_schedule_hour", "backup_schedule_minute", "max_backups", "log_retention_days"):
         if col not in scols:
             if col not in _MIGRATION_SETTINGS_COLS:
                 raise ValueError(f"Invalid migration column: {col}")
-            dtype = "INTEGER" if col in ("backup_schedule_hour", "backup_schedule_minute", "max_backups") else "TEXT"
+            dtype = "INTEGER" if col in ("backup_schedule_hour", "backup_schedule_minute", "max_backups", "log_retention_days") else "TEXT"
             conn.execute(f"ALTER TABLE settings ADD COLUMN {col} {dtype}")
     wcols = {r[1] for r in conn.execute("PRAGMA table_info(webapps)").fetchall()}
     if "last_alerted" not in wcols:
@@ -514,6 +524,10 @@ def _run_postgres_migrations():
         ('manual_expiry_date', 'TEXT', None),
         ('tags', 'TEXT', "''"),
         ('ssl_fingerprint', 'TEXT', None),
+        ('ssl_tls_version', 'TEXT', None),
+        ('ssl_cipher', 'TEXT', None),
+        ('ssl_serial', 'TEXT', None),
+        ('ssl_pem', 'TEXT', None),
         ('check_interval', 'INTEGER', '360'),
         ('ssl_alert_threshold', 'INTEGER', None),
         ('domain_alert_threshold', 'INTEGER', None),
@@ -542,6 +556,8 @@ def _run_postgres_migrations():
         conn.execute("ALTER TABLE settings ADD COLUMN backup_schedule_minute INTEGER DEFAULT 0")
     if 'max_backups' not in db.table_columns('settings'):
         conn.execute("ALTER TABLE settings ADD COLUMN max_backups INTEGER DEFAULT 30")
+    if 'log_retention_days' not in db.table_columns('settings'):
+        conn.execute("ALTER TABLE settings ADD COLUMN log_retention_days INTEGER DEFAULT 90")
 
     for col, dtype in [
         ('slack_webhook_url', 'TEXT'), ('slack_enabled', 'BOOLEAN'),
@@ -671,6 +687,7 @@ _ALLOWED_SETTINGS_COLS = frozenset({
     'ssl_alert_threshold', 'domain_alert_threshold', 'alert_emails',
     'slack_webhook_url', 'slack_enabled', 'zulip_webhook_url', 'zulip_enabled',
     'email_templates', 'backup_schedule_hour', 'backup_schedule_minute', 'max_backups',
+    'log_retention_days',
 })
 _ALLOWED_USER_COLS = frozenset({'password', 'role'})
 
@@ -715,12 +732,15 @@ def save_domain_check(domain_id, result):
     conn.execute("""UPDATE domains SET
         ssl_expiry=?, ssl_days_left=?, ssl_status=?, ssl_issuer=?, ssl_subject=?,
         ssl_sans=?, ssl_valid_from=?, ssl_valid_until=?,
+        ssl_tls_version=?, ssl_cipher=?, ssl_fingerprint=?, ssl_serial=?, ssl_pem=?,
         domain_expiry=?, domain_days_left=?, domain_status=?, domain_registrar=?,
         status=?, last_checked=?
         WHERE id=?""", (
         r.get("ssl_expiry"), r.get("ssl_days_left"), r.get("ssl_status"),
         r.get("ssl_issuer"), r.get("ssl_subject"), r.get("ssl_sans"),
         r.get("ssl_valid_from"), r.get("ssl_valid_until"),
+        r.get("ssl_tls_version"), r.get("ssl_cipher"),
+        r.get("ssl_fingerprint"), r.get("ssl_serial"), r.get("ssl_pem"),
         domain_expiry, domain_days_left, domain_status,
         r.get("domain_registrar"), r.get("status"), timezone_now_str(), domain_id
     ))
@@ -753,6 +773,8 @@ def save_domain_checks_batch(results):
             r.get("ssl_expiry"), r.get("ssl_days_left"), r.get("ssl_status"),
             r.get("ssl_issuer"), r.get("ssl_subject"), r.get("ssl_sans"),
             r.get("ssl_valid_from"), r.get("ssl_valid_until"),
+            r.get("ssl_tls_version"), r.get("ssl_cipher"),
+            r.get("ssl_fingerprint"), r.get("ssl_serial"), r.get("ssl_pem"),
             domain_expiry, domain_days_left, domain_status,
             r.get("domain_registrar"), r.get("status"), now, domain_id
         ))
@@ -760,6 +782,7 @@ def save_domain_checks_batch(results):
         conn.executemany("""UPDATE domains SET
             ssl_expiry=?, ssl_days_left=?, ssl_status=?, ssl_issuer=?, ssl_subject=?,
             ssl_sans=?, ssl_valid_from=?, ssl_valid_until=?,
+            ssl_tls_version=?, ssl_cipher=?, ssl_fingerprint=?, ssl_serial=?, ssl_pem=?,
             domain_expiry=?, domain_days_left=?, domain_status=?, domain_registrar=?,
             status=?, last_checked=?
             WHERE id=?""", params_list)
@@ -779,6 +802,7 @@ def save_check_result_history(domain_id, result):
         k: v for k, v in result.items()
         if k in ('ssl_expiry', 'ssl_days_left', 'ssl_status', 'ssl_issuer',
                  'ssl_subject', 'ssl_sans', 'ssl_valid_from', 'ssl_valid_until',
+                 'ssl_tls_version', 'ssl_cipher', 'ssl_fingerprint', 'ssl_serial', 'ssl_pem',
                  'domain_expiry', 'domain_days_left', 'domain_status',
                  'domain_registrar', 'domain_error')
     }, default=str)
@@ -803,6 +827,7 @@ def save_check_results_batch(results):
             k: v for k, v in r.items()
             if k in ('ssl_expiry', 'ssl_days_left', 'ssl_status', 'ssl_issuer',
                      'ssl_subject', 'ssl_sans', 'ssl_valid_from', 'ssl_valid_until',
+                     'ssl_tls_version', 'ssl_cipher', 'ssl_fingerprint', 'ssl_serial',
                      'domain_expiry', 'domain_days_left', 'domain_status',
                      'domain_registrar', 'domain_error')
         }, default=str)
@@ -941,6 +966,27 @@ def update_last_summary_sent():
     conn.commit()
 
 
+def clear_all_logs():
+    conn = get_db()
+    conn.execute("DELETE FROM logs")
+    conn.commit()
+
+
+def prune_logs():
+    conn = get_db()
+    settings = get_settings()
+    raw = (settings or {}).get('log_retention_days', 90)
+    try:
+        retention_days = int(raw)
+    except (ValueError, TypeError):
+        retention_days = 90
+    if retention_days <= 0:
+        return
+    cutoff = (timezone_now() - datetime.timedelta(days=retention_days)).strftime('%Y-%m-%d %H:%M:%S')
+    conn.execute("DELETE FROM logs WHERE created_at < ?", (cutoff,))
+    conn.commit()
+
+
 def add_log(log_type, message, domain_id=None, username=None, client_ip=None):
     conn = get_db()
     conn.execute("INSERT INTO logs (type, message, domain_id, username, client_ip) VALUES (?, ?, ?, ?, ?)",
@@ -948,7 +994,7 @@ def add_log(log_type, message, domain_id=None, username=None, client_ip=None):
     conn.commit()
 
 
-def _log_filters(log_type=None, query=None):
+def _log_filters(log_type=None, query=None, from_date=None, to_date=None, exclude_type=None):
     clauses = []
     params = []
     if log_type and log_type != 'all':
@@ -958,6 +1004,19 @@ def _log_filters(log_type=None, query=None):
         else:
             clauses.append("l.type=?")
             params.append(log_type)
+    if exclude_type:
+        if exclude_type == 'error':
+            clauses.append("(l.type<>? AND l.type NOT LIKE ?)")
+            params.extend(['error', '%error%'])
+        else:
+            clauses.append("l.type<>?")
+            params.append(exclude_type)
+    if from_date:
+        clauses.append("l.created_at >= ?")
+        params.append(from_date + ' 00:00:00')
+    if to_date:
+        clauses.append("l.created_at <= ?")
+        params.append(to_date + ' 23:59:59')
     if query:
         escaped = query.replace('%', '\\%').replace('_', '\\_')
         like = f"%{escaped}%"
@@ -967,9 +1026,9 @@ def _log_filters(log_type=None, query=None):
     return where, params
 
 
-def get_logs(limit=100, offset=0, log_type=None, query=None):
+def get_logs(limit=100, offset=0, log_type=None, query=None, from_date=None, to_date=None, exclude_type=None):
     conn = get_db()
-    where, params = _log_filters(log_type, query)
+    where, params = _log_filters(log_type, query, from_date, to_date, exclude_type)
     rows = conn.execute(f"""
         SELECT l.*, d.url as domain_url FROM logs l
         LEFT JOIN domains d ON l.domain_id = d.id
@@ -979,9 +1038,9 @@ def get_logs(limit=100, offset=0, log_type=None, query=None):
     return [dict(r) for r in rows]
 
 
-def get_logs_count(log_type=None, query=None):
+def get_logs_count(log_type=None, query=None, from_date=None, to_date=None, exclude_type=None):
     conn = get_db()
-    where, params = _log_filters(log_type, query)
+    where, params = _log_filters(log_type, query, from_date, to_date, exclude_type)
     row = conn.execute(f"""
         SELECT COUNT(*) as cnt FROM logs l
         LEFT JOIN domains d ON l.domain_id = d.id
@@ -990,9 +1049,9 @@ def get_logs_count(log_type=None, query=None):
     return row['cnt']
 
 
-def get_logs_summary(log_type=None, query=None):
+def get_logs_summary(log_type=None, query=None, from_date=None, to_date=None, exclude_type=None):
     conn = get_db()
-    where, params = _log_filters(log_type=log_type, query=query)
+    where, params = _log_filters(log_type=log_type, query=query, from_date=from_date, to_date=to_date, exclude_type=exclude_type)
     rows = conn.execute(f"""
         SELECT l.type, COUNT(*) as cnt FROM logs l
         LEFT JOIN domains d ON l.domain_id = d.id
@@ -1002,6 +1061,33 @@ def get_logs_summary(log_type=None, query=None):
     summary = {r['type'] or 'info': r['cnt'] for r in rows}
     summary['total'] = sum(summary.values())
     return summary
+
+
+def get_logs_activity(date_str=None):
+    conn = get_db()
+    if date_str:
+        start = date_str + ' 00:00:00'
+        end = date_str + ' 23:59:59'
+    else:
+        today = timezone_now().strftime('%Y-%m-%d')
+        start = today + ' 00:00:00'
+        end = today + ' 23:59:59'
+    if db.DB_TYPE == 'postgresql':
+        hour_expr = "EXTRACT(HOUR FROM created_at)::int"
+    else:
+        hour_expr = "CAST(strftime('%H', created_at) AS INTEGER)"
+    rows = conn.execute(f"""
+        SELECT {hour_expr} AS hour, COUNT(*) AS cnt
+        FROM logs
+        WHERE created_at >= ? AND created_at <= ?
+        GROUP BY hour
+        ORDER BY hour
+    """, (start, end)).fetchall()
+    hours = {r['hour']: r['cnt'] for r in rows}
+    result = []
+    for h in range(24):
+        result.append({'hour': h, 'count': hours.get(h, 0)})
+    return result
 
 
 def get_users():
@@ -1235,6 +1321,15 @@ def get_last_check_run():
     r = dict(row)
     r['started_at'] = normalise_dt_str(r.get('started_at'))
     r['completed_at'] = normalise_dt_str(r.get('completed_at'))
+    if r.get('started_at') and r.get('completed_at'):
+        sa = parse_dt(r['started_at'])
+        ca = parse_dt(r['completed_at'])
+        if sa and ca:
+            r['duration_seconds'] = int((ca - sa).total_seconds())
+        else:
+            r['duration_seconds'] = None
+    else:
+        r['duration_seconds'] = None
     return r
 
 
@@ -1292,6 +1387,35 @@ def get_dashboard_summary():
     last_check = get_last_check_run()
     snapshots = get_health_snapshots(7)
 
+    cutoff_24h = (timezone_now() - datetime.timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+    if db.DB_TYPE == 'postgresql':
+        hour_expr = "to_char(date_trunc('hour', checked_at), 'YYYY-MM-DD HH24:00:00')"
+    else:
+        hour_expr = "strftime('%Y-%m-%d %H:00:00', checked_at)"
+    wa_trend_raw = conn.execute(f"""
+        SELECT {hour_expr} AS hour,
+               COUNT(*) AS total,
+               SUM(CASE WHEN status IN ('up','slow') THEN 1 ELSE 0 END) AS up_count
+        FROM webapp_results
+        WHERE checked_at >= ?
+        GROUP BY {hour_expr}
+        ORDER BY hour ASC
+    """, (cutoff_24h,)).fetchall()
+    webapp_trend = []
+    for r in wa_trend_raw:
+        pct = round((r['up_count'] / r['total']) * 100, 1) if r['total'] else 0
+        webapp_trend.append(pct)
+
+    wa_overall = conn.execute("""
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN status IN ('up','slow') THEN 1 ELSE 0 END) AS up_count,
+               AVG(response_time_ms) AS avg_rt
+        FROM webapp_results
+        WHERE checked_at >= ?
+    """, (cutoff_24h,)).fetchone()
+    webapp_uptime_24h = round((wa_overall['up_count'] / wa_overall['total']) * 100, 1) if wa_overall and wa_overall['total'] else None
+    webapp_avg_rt = round(wa_overall['avg_rt'], 1) if wa_overall and wa_overall['avg_rt'] else None
+
     return {
         'full_count': len(full),
         'ssl_count': len(ssl),
@@ -1305,6 +1429,9 @@ def get_dashboard_summary():
         'last_check': last_check,
         'history': [dict(r) for r in snapshots],
         'webapp_stats': get_webapp_stats(),
+        'webapp_trend': webapp_trend,
+        'webapp_uptime_24h': webapp_uptime_24h,
+        'webapp_avg_response_time': webapp_avg_rt,
     }
 
 
