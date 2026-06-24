@@ -374,8 +374,13 @@ def health():
 
 
 @app.route('/api/metrics')
-@login_required
 def prometheus_metrics():
+    metrics_token = os.environ.get('METRICS_TOKEN', '').strip()
+    if metrics_token:
+        auth = request.headers.get('Authorization', '')
+        expected = 'Bearer ' + metrics_token
+        if auth != expected:
+            return 'Unauthorized', 401, {'Content-Type': 'text/plain; charset=utf-8'}
     try:
         status_counts = models.get_domain_status_counts()
         check_run = models.get_last_check_run()
@@ -737,19 +742,17 @@ def manual_check(domain_id):
     return jsonify(result)
 
 
-@app.route('/api/check-all', methods=['POST'])
-@admin_required
-@csrf_required
-def check_all():
+def _run_full_check(trigger):
+    """Execute all domain checks and persist results. Used by both manual and scheduled paths."""
     if not _acquire_check_run():
-        return api_error('A check is already running', 409)
+        return None
     try:
         domains = models.get_domains()
         if not domains:
-            return jsonify({'message': 'No domains to check', 'results': []})
-        run_id = models.start_check_run('manual', len(domains))
+            return {'domains': [], 'results': [], 'run_id': None}
+        run_id = models.start_check_run(trigger, len(domains))
         if run_id is None:
-            return api_error('Another check started concurrently', 409)
+            return None
         results = []
         with ThreadPoolExecutor(max_workers=_check_workers) as pool:
             futures = {pool.submit(run_check_for_domain, d): d for d in domains}
@@ -757,7 +760,7 @@ def check_all():
                 r = future.result()
                 results.append(r)
         if not models.save_domain_checks_batch(results):
-            logger.warning("Manual check: batch save returned failure — results may be incomplete")
+            logger.warning("%s check: batch save returned failure — results may be incomplete", trigger)
         models.save_check_results_batch(results)
         log_entries = []
         domain_map_prev = {d['id']: d for d in domains}
@@ -772,15 +775,28 @@ def check_all():
         models.add_logs_batch(log_entries)
         models.update_check_run(run_id, len(results), 'completed')
         models.save_health_snapshot()
-        settings = models.get_settings()
-        domain_map = {d['id']: d for d in domains}
-        for r in results:
-            domain = domain_map.get(r.get('domain_id'))
-            if domain and r.get('status') in ('expired', 'expiring_soon', 'error'):
-                _maybe_send_alert(domain, r, settings)
-        return jsonify({'message': f'Checked {len(results)} domains', 'results': results})
+        return {'domains': domains, 'results': results, 'run_id': run_id}
     finally:
         _release_check_run()
+
+
+@app.route('/api/check-all', methods=['POST'])
+@admin_required
+@csrf_required
+def check_all():
+    result = _run_full_check('manual')
+    if result is None:
+        return api_error('A check is already running', 409)
+    if result['run_id'] is None:
+        return jsonify({'message': 'No domains to check', 'results': []})
+    domains, results = result['domains'], result['results']
+    settings = models.get_settings()
+    domain_map = {d['id']: d for d in domains}
+    for r in results:
+        domain = domain_map.get(r.get('domain_id'))
+        if domain and r.get('status') in ('expired', 'expiring_soon', 'error'):
+            _maybe_send_alert(domain, r, settings)
+    return jsonify({'message': f'Checked {len(results)} domains', 'results': results})
 
 
 # ─── Web Apps ──────────────────────────────────────────────────
@@ -1285,7 +1301,7 @@ def cert_details(domain_id):
         'ssl_cipher': domain.get('ssl_cipher'),
         'ssl_fingerprint': domain.get('ssl_fingerprint'),
         'ssl_serial': domain.get('ssl_serial'),
-        'ssl_pem': domain.get('ssl_pem'),
+        'ssl_pem': models.get_domain_pem(domain_id),
         'status': domain.get('status'),
         'last_checked': domain.get('last_checked'),
         'notes': domain.get('notes'),
@@ -1844,82 +1860,53 @@ def dashboard():
 
 # ─── Background scheduler ──────────────────────────────────────
 def check_all_background():
-    if not _acquire_check_run():
-        logger.info("Scheduled check skipped — another check is already running")
-        return
-    try:
-        with app.app_context():
-            logger.info("Scheduled check: checking all domains")
-            domains = models.get_domains()
-            run_id = models.start_check_run('scheduled', len(domains))
-            if run_id is None:
-                logger.warning("Scheduled check skipped — concurrent start detected")
-                return
-            results = []
-            with ThreadPoolExecutor(max_workers=_check_workers) as pool:
-                futures = {pool.submit(run_check_for_domain, d): d for d in domains}
-                for future in as_completed(futures):
-                    result = future.result()
-                    results.append(result)
-            if not models.save_domain_checks_batch(results):
-                logger.warning("Scheduled check: batch save returned failure — results may be incomplete")
-            models.save_check_results_batch(results)
-            log_entries = []
-            domain_map_prev = {d['id']: d for d in domains}
+    with app.app_context():
+        result = _run_full_check('scheduled')
+        if result is None:
+            logger.info("Scheduled check skipped — another check is already running")
+            return
+        domains, results, run_id = result['domains'], result['results'], result['run_id']
+        if run_id is None:
+            logger.info("No domains to check")
+            return
+
+        # Send individual alerts for expired/expiring/error domains
+        try:
+            settings = models.get_settings()
+            domain_map = {d['id']: d for d in domains}
             for r in results:
-                if r.get('success'):
-                    prev = domain_map_prev.get(r.get('domain_id'))
-                    if prev and prev.get('status') == r.get('status') and r.get('status') not in ('expired', 'error'):
-                        continue
-                log_type = 'error' if r.get('success') is False else 'check'
-                log_msg = f'[run:{run_id}] Check completed for {r["url"]}: {r["status"]}' if r.get('success') else f'[run:{run_id}] Check failed for {r["url"]}: {r.get("error")}'
-                log_entries.append((log_type, log_msg, r.get('domain_id'), None, None))
-            models.add_logs_batch(log_entries)
-            models.update_check_run(run_id, len(results), 'completed')
-            models.save_health_snapshot()
+                domain = domain_map.get(r.get('domain_id'))
+                if domain and r.get('status') in ('expired', 'expiring_soon', 'error'):
+                    _maybe_send_alert(domain, r, settings)
+        except Exception as e:
+            logger.warning("Failed to send individual alerts: %s", e)
 
-            # Send individual alerts for expired/expiring/error domains
-            try:
-                settings = models.get_settings()
-                domain_map = {d['id']: d for d in domains}
-                for r in results:
-                    domain = domain_map.get(r.get('domain_id'))
-                    if domain and r.get('status') in ('expired', 'expiring_soon', 'error'):
-                        _maybe_send_alert(domain, r, settings)
-            except Exception as e:
-                logger.warning("Failed to send individual alerts: %s", e)
+        # Send check complete summary email (once per day max)
+        try:
+            settings = models.get_settings()
+            last_summary = models.parse_dt(settings.get('last_summary_sent'))
+            if last_summary and (models.timezone_now() - last_summary).total_seconds() < models.SUMMARY_COOLDOWN_SECONDS:
+                logger.info("Summary already sent today, skipping")
+                return
+            smtp_cfg = _resolve_smtp_config(settings)
+            if smtp_cfg and smtp_cfg.get('smtp_email') and smtp_cfg.get('smtp_password'):
+                ssl_total = sum(1 for r in results if r.get('ssl_status') is not None)
+                ssl_healthy = sum(1 for r in results if r.get('ssl_status') == 'healthy')
+                ssl_expired = sum(1 for r in results if r.get('ssl_status') == 'expired')
+                ssl_warning = ssl_total - ssl_healthy - ssl_expired
+                domain_total = sum(1 for r in results if r.get('domain_status') is not None)
+                domain_healthy = sum(1 for r in results if r.get('domain_status') == 'healthy')
+                domain_expired = sum(1 for r in results if r.get('domain_status') == 'expired')
+                domain_warning = domain_total - domain_healthy - domain_expired
+                send_check_complete_summary(smtp_cfg, settings,
+                                            ssl_total, ssl_healthy, ssl_warning, ssl_expired,
+                                            domain_total, domain_healthy, domain_warning, domain_expired)
+                models.update_last_summary_sent()
+        except Exception as e:
+            logger.warning("Failed to send check summary for run %s: %s", run_id, e)
 
-            # Send check complete summary email (once per day max)
-            try:
-                settings = models.get_settings()
-                last_summary = models.parse_dt(settings.get('last_summary_sent'))
-                if last_summary and (models.timezone_now() - last_summary).total_seconds() < models.SUMMARY_COOLDOWN_SECONDS:
-                    logger.info("Summary already sent today, skipping")
-                    return
-                smtp_cfg = _resolve_smtp_config(settings)
-                if smtp_cfg and smtp_cfg.get('smtp_email') and smtp_cfg.get('smtp_password'):
-                    snapshot = models.get_health_snapshots(days=1)
-                    ssl_total = sum(1 for r in results if r.get('ssl_status') is not None)
-                    ssl_healthy = sum(1 for r in results if r.get('ssl_status') == 'healthy')
-                    ssl_expired = sum(1 for r in results if r.get('ssl_status') == 'expired')
-                    ssl_warning = ssl_total - ssl_healthy - ssl_expired
-                    domain_total = sum(1 for r in results if r.get('domain_status') is not None)
-                    domain_healthy = sum(1 for r in results if r.get('domain_status') == 'healthy')
-                    domain_expired = sum(1 for r in results if r.get('domain_status') == 'expired')
-                    domain_warning = domain_total - domain_healthy - domain_expired
-                    send_check_complete_summary(smtp_cfg, settings,
-                                                ssl_total, ssl_healthy, ssl_warning, ssl_expired,
-                                                domain_total, domain_healthy, domain_warning, domain_expired)
-                    models.update_last_summary_sent()
-            except Exception as e:
-                logger.warning("Failed to send check summary for run %s: %s", run_id, e)
-
-            logger.info("Scheduled check completed for %d domains (run %s)", len(domains), run_id)
-            models.prune_logs()
-    except Exception as e:
-        logger.error(f"Scheduled check failed: {e}")
-    finally:
-        _release_check_run()
+        logger.info("Scheduled check completed for %d domains (run %s)", len(domains), run_id)
+        models.prune_logs()
 
 
 def check_webapps_background():
@@ -1983,17 +1970,14 @@ def _handle_sigterm(signum, frame):
 signal.signal(signal.SIGTERM, _handle_sigterm)
 signal.signal(signal.SIGINT, _handle_sigterm)
 
-# Start scheduler on import so it works under gunicorn (not just `python app.py`)
-if not os.environ.get("PYTEST_VERSION"):
-    import sys as _sys
-    _sys.stderr.write("[vigil] Initialising scheduler at module level...\n")
-    _sys.stderr.flush()
-    start_scheduler(check_all_background, check_webapps_background)
-    backup.schedule_backup(sched_mod.scheduler)
-    atexit.register(shutdown)
-
 
 def main():
+    # Scheduler runs here for `python app.py` dev mode.
+    # Under gunicorn, it starts in gunicorn.conf.py post_worker_init instead.
+    if not os.environ.get("PYTEST_VERSION"):
+        start_scheduler(check_all_background, check_webapps_background)
+        backup.schedule_backup(sched_mod.scheduler)
+        atexit.register(shutdown)
     debug = os.environ.get('FLASK_DEBUG', '0') == '1'
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=debug)

@@ -4,6 +4,8 @@ import time
 import urllib.request
 import urllib.error
 
+from checker import _parse_hostname, _is_private_host
+
 logger = logging.getLogger(__name__)
 
 SLOW_THRESHOLD_MS = 2000
@@ -42,9 +44,14 @@ def check_webapp(wa):
         if 'Content-Type' not in req_headers:
             req_headers['Content-Type'] = 'application/json'
 
+    hostname = _parse_hostname(url)
+    if _is_private_host(hostname):
+        result['error'] = 'Connection to private IP blocked'
+        return result
+
+    t0 = time.perf_counter()
     try:
         req = urllib.request.Request(url, data=data, headers=req_headers, method=method)
-        t0 = time.perf_counter()
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             elapsed = (time.perf_counter() - t0) * 1000
             result['response_time_ms'] = round(elapsed, 1)

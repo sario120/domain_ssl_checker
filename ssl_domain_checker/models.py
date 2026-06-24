@@ -158,7 +158,8 @@ CREATE TABLE IF NOT EXISTS domains (
     notes TEXT, ssl_alert_threshold INTEGER, domain_alert_threshold INTEGER,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP, last_alerted TEXT,
     ssl_tls_version TEXT, ssl_cipher TEXT, ssl_fingerprint TEXT, ssl_serial TEXT,
-    ssl_pem TEXT
+    tags TEXT DEFAULT '', check_interval INTEGER DEFAULT 360,
+    manual_registrar TEXT, manual_expiry_date TEXT
 );
 CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -301,7 +302,8 @@ CREATE TABLE IF NOT EXISTS domains (
     notes TEXT, ssl_alert_threshold INTEGER, domain_alert_threshold INTEGER,
     created_at TIMESTAMPTZ DEFAULT NOW(), last_alerted TIMESTAMPTZ,
     ssl_tls_version TEXT, ssl_cipher TEXT, ssl_fingerprint TEXT, ssl_serial TEXT,
-    ssl_pem TEXT
+    tags TEXT DEFAULT '', check_interval INTEGER DEFAULT 360,
+    manual_registrar TEXT, manual_expiry_date TEXT
 );
 CREATE TABLE IF NOT EXISTS settings (
     id BIGSERIAL PRIMARY KEY,
@@ -435,7 +437,7 @@ CREATE INDEX IF NOT EXISTS idx_webapp_results_app ON webapp_results(webapp_id, c
 _MIGRATION_DOMAIN_COLS = frozenset({
     'ssl_alert_threshold', 'domain_alert_threshold', 'notes', 'manual_expiry_date',
     'check_interval', 'manual_registrar', 'last_alerted', 'tags', 'ssl_fingerprint',
-    'ssl_tls_version', 'ssl_cipher', 'ssl_serial', 'ssl_pem',
+    'ssl_tls_version', 'ssl_cipher', 'ssl_serial',
 })
 _MIGRATION_SETTINGS_COLS = frozenset({
     'last_summary_sent', 'slack_webhook_url', 'slack_enabled',
@@ -462,7 +464,6 @@ def _run_sqlite_migrations():
         ('ssl_tls_version', 'ALTER TABLE domains ADD COLUMN ssl_tls_version TEXT'),
         ('ssl_cipher', 'ALTER TABLE domains ADD COLUMN ssl_cipher TEXT'),
         ('ssl_serial', 'ALTER TABLE domains ADD COLUMN ssl_serial TEXT'),
-        ('ssl_pem', 'ALTER TABLE domains ADD COLUMN ssl_pem TEXT'),
         ('check_interval', 'ALTER TABLE domains ADD COLUMN check_interval INTEGER DEFAULT 360'),
         ('slack_webhook_url', 'ALTER TABLE settings ADD COLUMN slack_webhook_url TEXT DEFAULT ""'),
         ('slack_enabled', 'ALTER TABLE settings ADD COLUMN slack_enabled INTEGER DEFAULT 0'),
@@ -527,7 +528,6 @@ def _run_postgres_migrations():
         ('ssl_tls_version', 'TEXT', None),
         ('ssl_cipher', 'TEXT', None),
         ('ssl_serial', 'TEXT', None),
-        ('ssl_pem', 'TEXT', None),
         ('check_interval', 'INTEGER', '360'),
         ('ssl_alert_threshold', 'INTEGER', None),
         ('domain_alert_threshold', 'INTEGER', None),
@@ -732,7 +732,7 @@ def save_domain_check(domain_id, result):
     conn.execute("""UPDATE domains SET
         ssl_expiry=?, ssl_days_left=?, ssl_status=?, ssl_issuer=?, ssl_subject=?,
         ssl_sans=?, ssl_valid_from=?, ssl_valid_until=?,
-        ssl_tls_version=?, ssl_cipher=?, ssl_fingerprint=?, ssl_serial=?, ssl_pem=?,
+        ssl_tls_version=?, ssl_cipher=?, ssl_fingerprint=?, ssl_serial=?,
         domain_expiry=?, domain_days_left=?, domain_status=?, domain_registrar=?,
         status=?, last_checked=?
         WHERE id=?""", (
@@ -740,7 +740,7 @@ def save_domain_check(domain_id, result):
         r.get("ssl_issuer"), r.get("ssl_subject"), r.get("ssl_sans"),
         r.get("ssl_valid_from"), r.get("ssl_valid_until"),
         r.get("ssl_tls_version"), r.get("ssl_cipher"),
-        r.get("ssl_fingerprint"), r.get("ssl_serial"), r.get("ssl_pem"),
+        r.get("ssl_fingerprint"), r.get("ssl_serial"),
         domain_expiry, domain_days_left, domain_status,
         r.get("domain_registrar"), r.get("status"), timezone_now_str(), domain_id
     ))
@@ -774,7 +774,7 @@ def save_domain_checks_batch(results):
             r.get("ssl_issuer"), r.get("ssl_subject"), r.get("ssl_sans"),
             r.get("ssl_valid_from"), r.get("ssl_valid_until"),
             r.get("ssl_tls_version"), r.get("ssl_cipher"),
-            r.get("ssl_fingerprint"), r.get("ssl_serial"), r.get("ssl_pem"),
+            r.get("ssl_fingerprint"), r.get("ssl_serial"),
             domain_expiry, domain_days_left, domain_status,
             r.get("domain_registrar"), r.get("status"), now, domain_id
         ))
@@ -782,7 +782,7 @@ def save_domain_checks_batch(results):
         conn.executemany("""UPDATE domains SET
             ssl_expiry=?, ssl_days_left=?, ssl_status=?, ssl_issuer=?, ssl_subject=?,
             ssl_sans=?, ssl_valid_from=?, ssl_valid_until=?,
-            ssl_tls_version=?, ssl_cipher=?, ssl_fingerprint=?, ssl_serial=?, ssl_pem=?,
+            ssl_tls_version=?, ssl_cipher=?, ssl_fingerprint=?, ssl_serial=?,
             domain_expiry=?, domain_days_left=?, domain_status=?, domain_registrar=?,
             status=?, last_checked=?
             WHERE id=?""", params_list)
@@ -827,7 +827,7 @@ def save_check_results_batch(results):
             k: v for k, v in r.items()
             if k in ('ssl_expiry', 'ssl_days_left', 'ssl_status', 'ssl_issuer',
                      'ssl_subject', 'ssl_sans', 'ssl_valid_from', 'ssl_valid_until',
-                     'ssl_tls_version', 'ssl_cipher', 'ssl_fingerprint', 'ssl_serial',
+                     'ssl_tls_version', 'ssl_cipher', 'ssl_fingerprint', 'ssl_serial', 'ssl_pem',
                      'domain_expiry', 'domain_days_left', 'domain_status',
                      'domain_registrar', 'domain_error')
         }, default=str)
@@ -1474,6 +1474,23 @@ def get_domain_check_history(domain_id, days=7):
         (domain_id, cutoff)
     ).fetchall()
     return [{'date': normalise_dt_str(r['checked_at']), 'ssl_days_left': r['ssl_days_left']} for r in rows]
+
+
+def get_domain_pem(domain_id):
+    """Return the most recent PEM for a domain from check_results (avoids bloating the domains table)."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT result_json FROM check_results WHERE domain_id=? AND result_json LIKE '%ssl_pem%' "
+        "ORDER BY checked_at DESC LIMIT 1",
+        (domain_id,)
+    ).fetchone()
+    if row and row['result_json']:
+        try:
+            data = json.loads(row['result_json'])
+            return data.get('ssl_pem')
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return None
 
 
 # ─── Webapps ────────────────────────────────────────────────────

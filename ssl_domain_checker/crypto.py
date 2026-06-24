@@ -45,7 +45,6 @@ def decrypt(ciphertext):
     if legacy_key is not None:
         logger.warning(
             "Decrypting with SECRET_KEY (legacy). Set ENCRYPTION_KEY and re-encrypt secrets. "
-            "See https://opencode.ai for migration instructions."
         )
         try:
             return Fernet(legacy_key).decrypt(ciphertext.encode()).decode()
