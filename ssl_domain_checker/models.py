@@ -1495,6 +1495,13 @@ def get_domain_pem(domain_id):
 
 # ─── Webapps ────────────────────────────────────────────────────
 
+_ALLOWED_WEBAPP_SORT_COLS = frozenset({
+    'name', 'url', 'status', 'response_time_ms', 'last_checked', 'total_checks',
+    'uptime_pct',
+})
+_ALLOWED_SORT_DIRS = frozenset({'asc', 'desc'})
+
+
 def get_webapps(search='', status='', sort_by='name', sort_dir='asc', page=1, page_size=0):
     conn = get_db()
     conditions = []
@@ -1506,11 +1513,14 @@ def get_webapps(search='', status='', sort_by='name', sort_dir='asc', page=1, pa
         conditions.append("status=?")
         params.append(status)
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
-    order_col = sort_by if sort_by in ('name', 'url', 'status', 'response_time_ms', 'last_checked', 'total_checks') else 'name'
+    if sort_by not in _ALLOWED_WEBAPP_SORT_COLS:
+        sort_by = 'name'
+    if sort_dir not in _ALLOWED_SORT_DIRS:
+        sort_dir = 'asc'
     if sort_by == 'uptime_pct':
         order_clause = "ORDER BY (CAST(successful_checks AS REAL) / MAX(total_checks, 1)) " + sort_dir
     else:
-        order_clause = f"ORDER BY {order_col} {sort_dir}"
+        order_clause = f"ORDER BY {sort_by} {sort_dir}"
     query = f"SELECT * FROM webapps {where} {order_clause}, name ASC"
     if page_size > 0:
         offset = (page - 1) * page_size

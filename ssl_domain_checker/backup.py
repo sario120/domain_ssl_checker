@@ -499,9 +499,13 @@ def restore_backup(filename):
     return True
 
 
+def _safe_basename(name):
+    return os.path.basename(name).replace('\0', '')
+
+
 def upload_and_restore(file_storage):
     ensure_backup_dir()
-    original_name = file_storage.filename or 'uploaded_backup.db.gz'
+    original_name = _safe_basename(file_storage.filename or 'uploaded_backup.db.gz')
     dest_path = os.path.join(BACKUP_DIR, f"_upload_{int(datetime.now(timezone.utc).timestamp())}_{original_name}")
     file_storage.save(dest_path)
     os.chmod(dest_path, stat.S_IRUSR | stat.S_IWUSR)

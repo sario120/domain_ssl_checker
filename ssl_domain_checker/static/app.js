@@ -362,11 +362,11 @@ document.addEventListener('click', (e) => {
         '<div class="compare-row"><span class="compare-label">Response Time</span><span class="compare-value">' + (a.response_time_ms != null ? a.response_time_ms + 'ms' : '—') + '</span></div>' +
         '<div class="compare-row"><span class="compare-label">Status Code</span><span class="compare-value">' + (a.last_status_code || '—') + '</span></div>' +
         '<div class="compare-row"><span class="compare-label">Uptime</span><span class="compare-value">' + (a.total_checks ? Math.round((a.successful_checks || 0) / a.total_checks * 100) + '%' : '—') + '</span></div>' +
-        '<div class="compare-row"><span class="compare-label">Method</span><span class="compare-value">' + (a.method || 'GET') + '</span></div>' +
+        '<div class="compare-row"><span class="compare-label">Method</span><span class="compare-value">' + escHtml(a.method || 'GET') + '</span></div>' +
         '<div class="compare-row"><span class="compare-label">Interval</span><span class="compare-value">' + (a.check_interval ? (a.check_interval >= 3600 ? Math.round(a.check_interval / 3600) + 'h' : a.check_interval >= 60 ? Math.round(a.check_interval / 60) + 'm' : a.check_interval + 's') : '—') + '</span></div>' +
         '<div class="compare-row"><span class="compare-label">Tags</span><span class="compare-value">' + escHtml(tags || '—') + '</span></div>' +
         '<div class="compare-row"><span class="compare-label">Notes</span><span class="compare-value">' + (a.notes ? escHtml(a.notes.substring(0, 50)) : '—') + '</span></div>' +
-        '<div class="compare-row"><span class="compare-label">Last Checked</span><span class="compare-value">' + (a.last_checked ? relativeTime(a.last_checked) : 'Never') + '</span></div>' +
+        '<div class="compare-row"><span class="compare-label">Last Checked</span><span class="compare-value">' + (a.last_checked ? escHtml(relativeTime(a.last_checked)) : 'Never') + '</span></div>' +
         '</div>';
     }).join('');
     document.getElementById('compare-modal').classList.add('open');
@@ -1195,7 +1195,7 @@ function toast(msg, type = 'success') {
   const container = document.getElementById('toast-container');
   const el = document.createElement('div');
   el.className = 'toast ' + type;
-  el.innerHTML = `<span>${msg}</span><button class="toast-close">&times;</button>`;
+    el.innerHTML = '<span>' + escHtml(msg) + '</span><button class="toast-close">&times;</button>';
   container.appendChild(el);
   const close = () => { el.classList.add('removing'); setTimeout(() => el.remove(), 200); };
   el.querySelector('.toast-close').onclick = close;
@@ -2659,7 +2659,7 @@ function renderTableRows(domains, type, tbody, selSet, isSslOnly, _stats) {
     const prevStatus = _prevStatuses[type][d.id];
     const changedClass = prevStatus && prevStatus !== status ? 'status-changed' : '';
     const expiryBar = renderExpiryBar(d, type);
-    const lastChecked = d.last_checked ? '<span class="rel-time" data-date="' + d.last_checked + '" title="' + formatDate(d.last_checked) + '">' + relativeTime(d.last_checked) + '</span>' : 'Never';
+    const lastChecked = d.last_checked ? '<span class="rel-time" data-date="' + escHtml(d.last_checked) + '" title="' + escHtml(formatDate(d.last_checked)) + '">' + escHtml(relativeTime(d.last_checked)) + '</span>' : 'Never';
     const alertBadge = _isRecentlyAlerted(d) ? '<span class="alert-badge" title="Alert sent within 24h">🔔</span>' : '';
 
     let expiryCells = '';
@@ -2853,7 +2853,7 @@ function renderCardHtml(d, type, selSet, isSslOnly) {
         ${sparklineHtml}
         ${registrarHtml}
         ${sslExtra}
-        <div class="domain-meta">${d.last_checked ? 'Checked: <span class="rel-time" data-date="' + d.last_checked + '" title="' + formatDate(d.last_checked) + '">' + relativeTime(d.last_checked) + '</span>' : 'Never checked'}
+        <div class="domain-meta">${d.last_checked ? 'Checked: <span class="rel-time" data-date="' + escHtml(d.last_checked) + '" title="' + escHtml(formatDate(d.last_checked)) + '">' + escHtml(relativeTime(d.last_checked)) + '</span>' : 'Never checked'}
           <button class="domain-card-expand" data-action="toggle-details" data-id="${d.id}">&#9654; Details</button>
         </div>
         ${notesHtml}
@@ -3675,7 +3675,7 @@ async function testSmtp() {
   logEl.style.display = 'block';
   logEl.innerHTML = '';
 
-  const addLog = (msg, cls) => { logEl.innerHTML += `<div class="log-step ${cls}">${msg}</div>`; logEl.scrollTop = logEl.scrollHeight; };
+  const addLog = (msg, cls) => { logEl.innerHTML += '<div class="log-step ' + cls + '">' + escHtml(msg) + '</div>'; logEl.scrollTop = logEl.scrollHeight; };
 
   addLog('Resolving SMTP server...', 'wait');
   try {
@@ -4461,8 +4461,21 @@ document.addEventListener('click', (e) => {
     const html = document.getElementById('email-tpl-html').value;
     const preview = document.getElementById('email-tpl-preview');
     preview.style.display = 'block';
-    const safeHtml = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '').replace(/on\w+\s*=\s*"[^"]*"/gi, '').replace(/on\w+\s*=\s*'[^']*'/gi, '');
-    preview.innerHTML = `<div style="font-size:13px;color:var(--text-muted);margin-bottom:8px">Subject: ${escHtml(subject)}</div>${safeHtml}`;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    tmp.querySelectorAll('script, style, iframe, object, embed, form, svg, meta, link, base').forEach(el => el.remove());
+    tmp.querySelectorAll('*').forEach(el => {
+      for (const attr of el.attributes) {
+        const name = attr.name.toLowerCase();
+        if (name.startsWith('on') || name === 'href' || name === 'xlink:href' || name === 'src' || name === 'action' || name === 'formaction' || name === 'data' || name === 'background') {
+          const val = attr.value.trim().toLowerCase();
+          if (val.startsWith('javascript:') || val.startsWith('vbscript:') || val.startsWith('data:') || val.startsWith('blob:')) {
+            el.removeAttribute(attr.name);
+          }
+        }
+      }
+    });
+    preview.innerHTML = '<div style="font-size:13px;color:var(--text-muted);margin-bottom:8px">Subject: ' + escHtml(subject) + '</div>' + tmp.innerHTML;
   }
   if (e.target.dataset.action === 'reset-email-templates') {
     if (!confirm('Reset all email templates to defaults?')) return;
@@ -4933,15 +4946,15 @@ function handleImportResult(result) {
   let detailsHtml = '';
   if (result.added_list && result.added_list.length) {
     detailsHtml += '<div class="collapsible-header" onclick="this.classList.toggle(\'collapsed\')"><span class="collapse-arrow">&#9660;</span><strong>Added (' + result.added_list.length + ')</strong></div>';
-    detailsHtml += '<div class="collapsible-body" style="margin:4px 0 10px 20px;font-size:12px;color:var(--green);">' + result.added_list.map(function(u) { return '<div>' + u + '</div>'; }).join('') + '</div>';
+    detailsHtml += '<div class="collapsible-body" style="margin:4px 0 10px 20px;font-size:12px;color:var(--green);">' + result.added_list.map(function(u) { return '<div>' + escHtml(u) + '</div>'; }).join('') + '</div>';
   }
   if (result.skipped_list && result.skipped_list.length) {
     detailsHtml += '<div class="collapsible-header collapsed" onclick="this.classList.toggle(\'collapsed\')"><span class="collapse-arrow">&#9660;</span><strong>Skipped (' + result.skipped_list.length + ')</strong></div>';
-    detailsHtml += '<div class="collapsible-body" style="margin:4px 0 10px 20px;font-size:12px;color:var(--text-muted);">' + result.skipped_list.map(function(s) { return '<div>' + s.url + ' <span style="color:var(--text-muted)">\u2014 ' + s.reason + '</span></div>'; }).join('') + '</div>';
+    detailsHtml += '<div class="collapsible-body" style="margin:4px 0 10px 20px;font-size:12px;color:var(--text-muted);">' + result.skipped_list.map(function(s) { return '<div>' + escHtml(s.url) + ' <span style="color:var(--text-muted)">\u2014 ' + escHtml(s.reason) + '</span></div>'; }).join('') + '</div>';
   }
   if (hasErrors) {
     detailsHtml += '<div class="collapsible-header collapsed" onclick="this.classList.toggle(\'collapsed\')"><span class="collapse-arrow">&#9660;</span><strong>Errors (' + result.errors.length + ')</strong></div>';
-    detailsHtml += '<div class="collapsible-body" style="margin:4px 0 10px 20px;font-size:12px;color:var(--red);">' + result.errors.map(function(e) { return '<div>' + e + '</div>'; }).join('') + '</div>';
+    detailsHtml += '<div class="collapsible-body" style="margin:4px 0 10px 20px;font-size:12px;color:var(--red);">' + result.errors.map(function(e) { return '<div>' + escHtml(e) + '</div>'; }).join('') + '</div>';
   }
   var detailsContainer = document.getElementById('import-details');
   detailsContainer.innerHTML = detailsHtml;
@@ -5127,13 +5140,13 @@ function openCertModal(id) {
     const footer = document.getElementById('cert-modal-footer');
     const lcEl = document.getElementById('cert-last-checked');
     if (d.last_checked) {
-      lcEl.innerHTML = 'Last checked: <span class="rel-time" data-date="' + d.last_checked + '" title="' + formatDate(d.last_checked) + '">' + relativeTime(d.last_checked) + '</span>';
+      lcEl.innerHTML = 'Last checked: <span class="rel-time" data-date="' + escHtml(d.last_checked) + '" title="' + escHtml(formatDate(d.last_checked)) + '">' + escHtml(relativeTime(d.last_checked)) + '</span>';
     } else {
       lcEl.textContent = 'Never checked';
     }
     footer.style.display = 'flex';
   }).catch(e => {
-    document.getElementById('cert-details').innerHTML = `<div class="cert-loading">Error: ${e.message}</div>`;
+    document.getElementById('cert-details').innerHTML = '<div class="cert-loading">Error: ' + escHtml(e.message) + '</div>';
   });
 }
 
@@ -5723,8 +5736,8 @@ function openCompareModal(type) {
       <div class="compare-row"><span class="compare-label">Status</span><span class="compare-value ${changed ? 'changed' : ''}">${currentStatus}</span></div>
       <div class="compare-row"><span class="compare-label">SSL Expiry</span><span class="compare-value">${d.ssl_expiry ? d.ssl_expiry.slice(0, 10) : 'N/A'} ${d.ssl_days_left !== null ? `(${d.ssl_days_left}d)` : ''}</span></div>
       ${!isSslOnly ? `<div class="compare-row"><span class="compare-label">Domain Exp</span><span class="compare-value">${d.domain_expiry ? d.domain_expiry.slice(0, 10) : (d.manual_expiry_date || 'N/A')} ${d.domain_days_left !== null ? `(${d.domain_days_left}d)` : ''}</span></div>` : ''}
-      <div class="compare-row"><span class="compare-label">Registrar</span><span class="compare-value">${(d.manual_registrar || d.domain_registrar) || 'N/A'}</span></div>
-      <div class="compare-row"><span class="compare-label">Last Checked</span><span class="compare-value">${d.last_checked ? formatDate(d.last_checked) : 'Never'}</span></div>
+      <div class="compare-row"><span class="compare-label">Registrar</span><span class="compare-value">${escHtml((d.manual_registrar || d.domain_registrar) || 'N/A')}</span></div>
+      <div class="compare-row"><span class="compare-label">Last Checked</span><span class="compare-value">${d.last_checked ? escHtml(formatDate(d.last_checked)) : 'Never'}</span></div>
       <div class="compare-row"><span class="compare-label">Notes</span><span class="compare-value">${d.notes ? escHtml(d.notes.substring(0, 50)) : '—'}</span></div>
     </div>`;
   }).join('');

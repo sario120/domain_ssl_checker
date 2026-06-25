@@ -80,11 +80,12 @@
     loginCard.classList.add('shake');
     inputs.forEach(function (el) { el.classList.add('error'); });
 
+    var safeMsg = msg.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     if (isLocked) {
       errEl.classList.add('locked');
-      errEl.innerHTML = '<span class="lock-icon">🔒</span><span>' + msg + '</span><button type="button" class="err-close" id="err-close" aria-label="Dismiss">&times;</button>';
+      errEl.innerHTML = '<span class="lock-icon">🔒</span><span>' + safeMsg + '</span><button type="button" class="err-close" id="err-close" aria-label="Dismiss">&times;</button>';
     } else {
-      errEl.innerHTML = msg + '<button type="button" class="err-close" id="err-close" aria-label="Dismiss">&times;</button>';
+      errEl.innerHTML = safeMsg + '<button type="button" class="err-close" id="err-close" aria-label="Dismiss">&times;</button>';
     }
 
     var closeBtn = document.getElementById('err-close');

@@ -1,8 +1,36 @@
+import ipaddress
 import logging
+from urllib.parse import urlparse
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+_PRIVATE_NETLOCS = frozenset({'localhost', '127.0.0.1', '::1', '0.0.0.0'})
+_PRIVATE_NETS = [
+    ipaddress.ip_network('10.0.0.0/8'),
+    ipaddress.ip_network('172.16.0.0/12'),
+    ipaddress.ip_network('192.168.0.0/16'),
+    ipaddress.ip_network('169.254.0.0/16'),
+    ipaddress.ip_network('fc00::/7'),
+]
+
+
+def validate_webhook_url(url):
+    """Validate that a webhook URL is safe (HTTPS, not a private/internal host)."""
+    parsed = urlparse(url)
+    if parsed.scheme != 'https' or not parsed.netloc:
+        return False
+    host = parsed.hostname or ''
+    if host in _PRIVATE_NETLOCS:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+        if any(ip in net for net in _PRIVATE_NETS):
+            return False
+    except ValueError:
+        pass
+    return True
 
 _STATUS_COLORS = {
     "expired": "#ef4444",
@@ -33,6 +61,8 @@ def send_webhook_alerts(domain_name, status, ssl_days_left, domain_days_left, se
 
 
 def _send_slack(webhook_url, domain_name, status, ssl_days_left, domain_days_left, domain_data=None):
+    if not validate_webhook_url(webhook_url):
+        raise ValueError("Blocked: unsafe webhook URL")
     color = _STATUS_COLORS.get(status, "#64748b")
     fields = [
         {"type": "mrkdwn", "text": f"*Domain:*\n{domain_name}"},
@@ -54,6 +84,8 @@ def _send_slack(webhook_url, domain_name, status, ssl_days_left, domain_days_lef
 
 def send_test_webhook(webhook_type, webhook_url):
     """Send a test message to a webhook."""
+    if not validate_webhook_url(webhook_url):
+        raise ValueError("Blocked: unsafe webhook URL")
     if webhook_type == 'slack':
         payload = {"blocks": [
             {"type": "header", "text": {"type": "plain_text", "text": "✅ Vigil Test Notification"}},
@@ -69,6 +101,8 @@ def send_test_webhook(webhook_type, webhook_url):
 
 
 def _send_zulip(webhook_url, domain_name, status, ssl_days_left, domain_days_left, domain_data=None):
+    if not validate_webhook_url(webhook_url):
+        raise ValueError("Blocked: unsafe webhook URL")
     ssl_line = f"SSL Days Left: {ssl_days_left}\n" if ssl_days_left is not None else ""
     domain_line = f"Domain Days Left: {domain_days_left}\n" if domain_days_left is not None else ""
     content = (

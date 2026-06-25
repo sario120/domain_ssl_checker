@@ -1,6 +1,5 @@
 import atexit
 import hashlib
-import ipaddress
 import hmac as hmac_mod
 import json
 import logging
@@ -17,8 +16,6 @@ from contextvars import ContextVar
 from datetime import datetime
 from functools import wraps
 from logging.handlers import RotatingFileHandler
-from urllib.parse import urlparse
-
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
@@ -35,7 +32,7 @@ import scheduler as sched_mod
 from checker import check_domain
 import webapp_checker
 from alert import send_alerts, test_smtp, send_check_complete_summary, _resolve_smtp_config
-from webhook import send_webhook_alerts
+from webhook import send_webhook_alerts, validate_webhook_url
 from scheduler import start_scheduler, get_next_scheduled_check
 import csv
 from io import StringIO
@@ -198,31 +195,6 @@ def csrf_required(f):
 def api_error(msg, code=400):
     return jsonify({'error': msg}), code
 
-
-_PRIVATE_NETLOCS = frozenset({'localhost', '127.0.0.1', '::1', '0.0.0.0'})
-_PRIVATE_NETS = [
-    ipaddress.ip_network('10.0.0.0/8'),
-    ipaddress.ip_network('172.16.0.0/12'),
-    ipaddress.ip_network('192.168.0.0/16'),
-    ipaddress.ip_network('169.254.0.0/16'),
-    ipaddress.ip_network('fc00::/7'),
-]
-
-
-def _validate_webhook_url(url):
-    parsed = urlparse(url)
-    if parsed.scheme != 'https' or not parsed.netloc:
-        return False
-    host = parsed.hostname or ''
-    if host in _PRIVATE_NETLOCS:
-        return False
-    try:
-        ip = ipaddress.ip_address(host)
-        if any(ip in net for net in _PRIVATE_NETS):
-            return False
-    except ValueError:
-        pass
-    return True
 
 
 def json_body(*required):
@@ -1367,7 +1339,7 @@ def update_settings_route():
     # Validate webhook URLs before saving
     for wh_key in ('slack_webhook_url', 'zulip_webhook_url'):
         url = data.get(wh_key)
-        if url and not _validate_webhook_url(url):
+        if url and not validate_webhook_url(url):
             return api_error(f'Invalid {wh_key}: must be an HTTPS URL')
     models.update_settings(data)
     # Granular audit log
@@ -1568,7 +1540,7 @@ def test_webhook_route():
     webhook_url = data.get('url')
     if not webhook_type or not webhook_url:
         return api_error('type and url are required')
-    if not _validate_webhook_url(webhook_url):
+    if not validate_webhook_url(webhook_url):
         return api_error('Webhook URL must be HTTPS')
     try:
         from webhook import send_test_webhook
@@ -1576,7 +1548,8 @@ def test_webhook_route():
         models.add_log('info', f'Test {webhook_type} alert sent', username=current_username())
         return jsonify({'message': f'Test {webhook_type} sent'})
     except Exception as e:
-        return api_error(f'{webhook_type} test failed: {e}', 500)
+        logger.exception("Webhook test failed for %s", webhook_type)
+        return api_error(f'{webhook_type} test failed', 500)
 
 
 # ─── Logs ──────────────────────────────────────────────────────
@@ -1671,7 +1644,8 @@ def upload_backup():
         models.add_log('audit', f'Database restored from uploaded backup: {final_name}', username=current_username())
         return jsonify({'message': 'Database restored from uploaded backup', 'filename': final_name})
     except Exception as e:
-        return api_error(f'Upload restore failed: {e}', 500)
+        logger.exception("Upload restore failed")
+        return api_error('Upload restore failed', 500)
 
 
 @app.route('/api/backups/restore', methods=['POST'])
@@ -1691,9 +1665,11 @@ def restore_backup():
         models.add_log('audit', f'Database restored from {filename}', username=current_username())
         return jsonify({'message': 'Database restored'})
     except FileNotFoundError as e:
-        return api_error(str(e))
+        logger.exception("Backup file not found: %s", filename)
+        return api_error('Backup file not found', 404)
     except Exception as e:
-        return api_error(f'Restore failed: {e}', 500)
+        logger.exception("Backup restore failed for %s", filename)
+        return api_error('Restore failed', 500)
 
 
 def _safe_backup_path(filename):
