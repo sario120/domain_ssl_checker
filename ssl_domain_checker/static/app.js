@@ -261,7 +261,7 @@ document.addEventListener('click', (e) => {
   else if (action === 'toggle-actions-dropdown') {
     e.stopPropagation();
     var dropdown = btn.nextElementSibling;
-    var isOpen = dropdown.style.display !== 'none';
+    var isOpen = dropdown.style.display === 'block';
     document.querySelectorAll('.actions-dropdown-content').forEach(function (d) { d.style.display = 'none'; });
     btn.setAttribute('aria-expanded', '' + !isOpen);
     if (!isOpen) {
@@ -547,8 +547,7 @@ document.addEventListener('click', (e) => {
   if (toggle) {
     e.stopPropagation();
     const dropdown = toggle.nextElementSibling;
-    const isOpen = dropdown.style.display !== 'none';
-    // Close all open dropdowns first
+    const isOpen = dropdown.style.display === 'block';
     document.querySelectorAll('.kebab-dropdown').forEach(d => d.style.display = 'none');
     if (!isOpen) {
       dropdown.style.display = 'block';
