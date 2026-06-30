@@ -16,7 +16,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 30s
     logging:
       driver: json-file
       options:
@@ -27,8 +27,8 @@ services:
         limits:
           cpus: "1"
           memory: 1G
-    security_opt:
-      - no-new-privileges:true
+    #security_opt:
+    #  - no-new-privileges:true  # disabled — fails on kernel 6.8 with Python. Re-enable on compatible hosts.
     read_only: true
     tmpfs:
       - /tmp
