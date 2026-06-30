@@ -5,8 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: vigil
     restart: unless-stopped
-    ports:
-      - "8010:5000"
+    network_mode: host
     env_file: .env
     volumes:
       - ./vigil-data:/app/data_volume
