@@ -22,6 +22,7 @@
   <svg class="theme-icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
 </button>
       <span class="nav-user" id="nav-username"></span>
+      <button class="nav-logout" data-action="change-password" title="Change password" style="background:none;border:none;color:var(--text-muted);cursor:pointer;padding:0 8px;font-size:15px;">&#128295;</button>
       <button class="nav-logout" data-action="logout">Logout</button>
     </div>
   </nav>
@@ -727,7 +728,7 @@
         <div class="user-table-wrapper">
           <table id="user-table">
             <thead>
-              <tr><th>User</th><th>Role</th><th>Status</th><th>Last Login</th><th>Login Fails</th><th>Actions</th></tr>
+              <tr><th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Last Login</th><th>Login Fails</th><th>Actions</th></tr>
             </thead>
             <tbody id="user-body"></tbody>
           </table>
@@ -1147,22 +1148,32 @@
           <span class="field-hint" id="user-username-hint"></span>
         </div>
         <div class="form-row">
-          <label for="user-password">Password</label>
-          <div class="password-field">
-            <input type="password" id="user-password" autocomplete="new-password">
-            <button type="button" class="toggle-pw" data-action="toggle-pw-visibility" data-target="user-password">&#128065;</button>
+          <label for="user-email">Email</label>
+          <input type="email" id="user-email">
+          <span class="field-hint" id="user-email-hint"></span>
+        </div>
+        <div id="user-password-section">
+          <div class="form-row">
+            <label for="user-password">Password</label>
+            <div class="password-field">
+              <input type="password" id="user-password" autocomplete="new-password">
+              <button type="button" class="toggle-pw" data-action="toggle-pw-visibility" data-target="user-password">&#128065;</button>
+            </div>
+            <div class="pw-strength" id="pw-strength">
+              <div class="pw-strength-bar"><div class="pw-strength-fill" id="pw-strength-fill"></div></div>
+              <span class="pw-strength-label" id="pw-strength-label"></span>
+            </div>
+            <div class="pw-requirements" id="pw-requirements">
+              <div class="pw-req" data-req="length">Min length</div>
+              <div class="pw-req" data-req="upper">Uppercase</div>
+              <div class="pw-req" data-req="lower">Lowercase</div>
+              <div class="pw-req" data-req="number">Number</div>
+              <div class="pw-req" data-req="special">Special char</div>
+            </div>
           </div>
-          <div class="pw-strength" id="pw-strength">
-            <div class="pw-strength-bar"><div class="pw-strength-fill" id="pw-strength-fill"></div></div>
-            <span class="pw-strength-label" id="pw-strength-label"></span>
-          </div>
-          <div class="pw-requirements" id="pw-requirements">
-            <div class="pw-req" data-req="length">Min length</div>
-            <div class="pw-req" data-req="upper">Uppercase</div>
-            <div class="pw-req" data-req="lower">Lowercase</div>
-            <div class="pw-req" data-req="number">Number</div>
-            <div class="pw-req" data-req="special">Special char</div>
-          </div>
+        </div>
+        <div class="form-row" id="user-invite-toggle" style="display:none">
+          <a href="#" id="user-invite-toggle-link" style="font-size:13px;color:var(--primary);text-decoration:none"></a>
         </div>
         <div class="form-row">
           <label for="user-role">Role</label>
@@ -1173,7 +1184,7 @@
         </div>
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" data-action="close-user-modal">Cancel</button>
-          <button type="submit" class="btn btn-primary" id="btn-save-user">Save</button>
+          <button type="submit" class="btn btn-primary" id="btn-save-user">Send Invite</button>
         </div>
       </form>
     </div>
@@ -1533,6 +1544,55 @@
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" data-action="close-quickadd-modal">Cancel</button>
           <button type="submit" class="btn btn-primary" id="btn-quickadd-save">Add</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Change Password Modal -->
+  <div id="chgpw-modal" class="modal">
+    <div class="modal-backdrop" data-action="close-chgpw-modal"></div>
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <h3>Change Password</h3>
+        <button class="modal-close" data-action="close-chgpw-modal">&times;</button>
+      </div>
+      <form id="chgpw-form">
+        <div class="form-row">
+          <label for="chgpw-current">Current Password</label>
+          <div class="password-field">
+            <input type="password" id="chgpw-current" autocomplete="current-password" required>
+            <button type="button" class="toggle-pw" data-action="toggle-pw-visibility" data-target="chgpw-current">&#128065;</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="chgpw-new">New Password</label>
+          <div class="password-field">
+            <input type="password" id="chgpw-new" autocomplete="new-password" required>
+            <button type="button" class="toggle-pw" data-action="toggle-pw-visibility" data-target="chgpw-new">&#128065;</button>
+          </div>
+          <div id="cp-pw-strength" class="pw-strength" style="display:none">
+            <div class="pw-strength-bar"><div class="pw-strength-fill" id="cp-pw-strength-fill"></div></div>
+            <span class="pw-strength-label" id="cp-pw-strength-label"></span>
+          </div>
+          <div class="pw-requirements" id="cp-pw-requirements">
+            <div class="pw-req" data-req="length">Min length</div>
+            <div class="pw-req" data-req="upper">Uppercase</div>
+            <div class="pw-req" data-req="lower">Lowercase</div>
+            <div class="pw-req" data-req="number">Number</div>
+            <div class="pw-req" data-req="special">Special char</div>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="chgpw-confirm">Confirm New Password</label>
+          <div class="password-field">
+            <input type="password" id="chgpw-confirm" autocomplete="new-password" required>
+            <button type="button" class="toggle-pw" data-action="toggle-pw-visibility" data-target="chgpw-confirm">&#128065;</button>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" data-action="close-chgpw-modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-chgpw-save">Change Password</button>
         </div>
       </form>
     </div>

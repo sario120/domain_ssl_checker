@@ -180,12 +180,22 @@ CREATE TABLE IF NOT EXISTS logs (
 );
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE, password TEXT NOT NULL,
+    username TEXT NOT NULL UNIQUE, email TEXT, password TEXT NOT NULL,
     role TEXT DEFAULT 'admin',
     login_fails INTEGER DEFAULT 0, last_fail TEXT, last_login TEXT,
     is_active INTEGER DEFAULT 1,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS invite_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_invite_tokens_hash ON invite_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_invite_tokens_user ON invite_tokens(user_id);
 CREATE TABLE IF NOT EXISTS security_settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_timeout INTEGER DEFAULT 60, max_login_attempts INTEGER DEFAULT 5,
@@ -325,12 +335,22 @@ CREATE TABLE IF NOT EXISTS logs (
 );
 CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
-    username TEXT NOT NULL UNIQUE, password TEXT NOT NULL,
+    username TEXT NOT NULL UNIQUE, email TEXT, password TEXT NOT NULL,
     role TEXT DEFAULT 'admin',
     login_fails INTEGER DEFAULT 0, last_fail TIMESTAMPTZ, last_login TIMESTAMPTZ,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE TABLE IF NOT EXISTS invite_tokens (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_invite_tokens_hash ON invite_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_invite_tokens_user ON invite_tokens(user_id);
 CREATE TABLE IF NOT EXISTS security_settings (
     id BIGSERIAL PRIMARY KEY,
     session_timeout INTEGER DEFAULT 60, max_login_attempts INTEGER DEFAULT 5,
@@ -490,6 +510,8 @@ def _run_sqlite_migrations():
         conn.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
     if "is_active" not in ucols:
         conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1")
+    if "email" not in ucols:
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
     lcols = {r[1] for r in conn.execute("PRAGMA table_info(logs)").fetchall()}
     if "username" not in lcols:
         conn.execute("ALTER TABLE logs ADD COLUMN username TEXT")
@@ -544,6 +566,8 @@ def _run_postgres_migrations():
         conn.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
     if 'is_active' not in db.table_columns('users'):
         conn.execute("ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT TRUE")
+    if 'email' not in db.table_columns('users'):
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
     if 'username' not in db.table_columns('logs'):
         conn.execute("ALTER TABLE logs ADD COLUMN username TEXT")
     if 'client_ip' not in db.table_columns('logs'):
@@ -689,7 +713,7 @@ _ALLOWED_SETTINGS_COLS = frozenset({
     'email_templates', 'backup_schedule_hour', 'backup_schedule_minute', 'max_backups',
     'log_retention_days',
 })
-_ALLOWED_USER_COLS = frozenset({'password', 'role'})
+_ALLOWED_USER_COLS = frozenset({'password', 'role', 'email'})
 
 
 def update_domain(domain_id, url=None, domain_type=None, notes=None, manual_expiry_date=None, manual_registrar=None):
@@ -1092,7 +1116,7 @@ def get_logs_activity(date_str=None):
 
 def get_users():
     conn = get_db()
-    rows = conn.execute("SELECT id, username, role, login_fails, last_login, created_at, is_active FROM users ORDER BY username").fetchall()
+    rows = conn.execute("SELECT id, username, email, role, login_fails, last_login, created_at, is_active FROM users ORDER BY username").fetchall()
     return [dict(r) for r in rows]
 
 
@@ -1102,11 +1126,31 @@ def get_user_by_username(username):
     return dict(row) if row else None
 
 
-def add_user(username, password, role="user"):
+def get_user(user_id):
+    conn = get_db()
+    row = conn.execute("SELECT id, username, email, role, is_active FROM users WHERE id=?", (user_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_user_by_email(email):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+    return dict(row) if row else None
+
+
+def add_user(username, password=None, role="user", email=None):
     conn = get_db()
     try:
-        conn.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-                     (username, generate_password_hash(password), role))
+        if password:
+            conn.execute(
+                "INSERT INTO users (username, email, password, role, is_active) VALUES (?, ?, ?, ?, 1)",
+                (username, email, generate_password_hash(password), role)
+            )
+        else:
+            conn.execute(
+                "INSERT INTO users (username, email, password, role, is_active) VALUES (?, ?, ?, ?, 0)",
+                (username, email, '', role)
+            )
         conn.commit()
         return {"ok": True}
     except Exception as e:
@@ -1117,7 +1161,7 @@ def add_user(username, password, role="user"):
         raise
 
 
-def update_user(user_id, password=None, role=None, is_active=None):
+def update_user(user_id, password=None, role=None, is_active=None, email=None):
     conn = get_db()
     filtered = []
     if password:
@@ -1126,6 +1170,8 @@ def update_user(user_id, password=None, role=None, is_active=None):
         filtered.append(("role=?", role))
     if is_active is not None:
         filtered.append(("is_active=?", bool(is_active)))
+    if email is not None:
+        filtered.append(("email=?", email))
     if not filtered:
         return {"ok": True}
     sets = ", ".join(s for s, _ in filtered)
@@ -1140,6 +1186,49 @@ def delete_user(user_id, current_user_id):
     if int(user_id) == int(current_user_id):
         return {"ok": False, "error": "Cannot delete yourself"}
     conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+    conn.commit()
+    return {"ok": True}
+
+
+INVITE_TOKEN_EXPIRY_HOURS = 48
+
+
+def create_invite_token(user_id):
+    raw = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    expires_at = (timezone_now() + datetime.timedelta(hours=INVITE_TOKEN_EXPIRY_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO invite_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
+        (user_id, token_hash, expires_at)
+    )
+    conn.commit()
+    return raw
+
+
+def verify_invite_token(raw_token):
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM invite_tokens WHERE token_hash=? AND used_at IS NULL AND expires_at > ?",
+        (token_hash, timezone_now_str())
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def complete_invite(raw_token, password):
+    token = verify_invite_token(raw_token)
+    if not token:
+        return {"ok": False, "error": "Invalid or expired invite token"}
+    conn = get_db()
+    conn.execute(
+        "UPDATE users SET password=?, is_active=1 WHERE id=?",
+        (generate_password_hash(password), token["user_id"])
+    )
+    conn.execute(
+        "UPDATE invite_tokens SET used_at=? WHERE id=?",
+        (timezone_now_str(), token["id"])
+    )
     conn.commit()
     return {"ok": True}
 

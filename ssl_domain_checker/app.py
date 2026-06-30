@@ -31,7 +31,7 @@ import email_templates
 import scheduler as sched_mod
 from checker import check_domain
 import webapp_checker
-from alert import send_alerts, test_smtp, send_check_complete_summary, _resolve_smtp_config
+from alert import send_alerts, test_smtp, send_check_complete_summary, send_invite_email, _resolve_smtp_config
 from webhook import send_webhook_alerts, validate_webhook_url
 from scheduler import start_scheduler, get_next_scheduled_check
 import csv
@@ -1367,6 +1367,32 @@ def update_settings_route():
     return jsonify({'message': 'Settings saved'})
 
 
+# ─── Self-service password change ────────────────────────────
+@app.route('/api/me/password', methods=['PUT'])
+@login_required
+@csrf_required
+def change_my_password():
+    uid = session.get('user_id')
+    if not uid:
+        return api_error('Session auth required (not API key)', 401)
+    data = request.get_json(silent=True) or {}
+    current_pw = data.get('current_password', '')
+    new_pw = data.get('new_password', '')
+    if not current_pw or not new_pw:
+        return api_error('Both current_password and new_password are required')
+    user = models.get_user_by_username(session['username'])
+    if not user:
+        return api_error('User not found', 404)
+    if not check_password_hash(user['password'], current_pw):
+        return api_error('Current password is incorrect', 403)
+    err = _validate_password(new_pw, models.get_security_settings())
+    if err:
+        return api_error(err)
+    models.update_user(uid, password=new_pw)
+    models.add_log('audit', f'Password changed: {user["username"]}', username=current_username())
+    return jsonify({'message': 'Password changed successfully'})
+
+
 # ─── Users ──────────────────────────────────────────────────────
 @app.route('/api/users', methods=['GET'])
 @admin_required
@@ -1383,10 +1409,11 @@ def add_user_route(data):
     username = data['username'].strip()
     password = data['password']
     role = data.get('role', 'viewer')
+    email = data.get('email', '').strip() or None
     err = _validate_password(password, models.get_security_settings())
     if err:
         return api_error(err)
-    result = models.add_user(username, password, role)
+    result = models.add_user(username, password=password, role=role, email=email)
     if not result.get('ok'):
         return api_error(result.get('error', 'Failed to create user'))
     models.add_log('audit', f'User created: {username}', username=current_username())
@@ -1401,13 +1428,14 @@ def update_user_route(user_id):
     password = data.get('password', '')
     role = data.get('role')
     is_active = data.get('is_active')
+    email = data.get('email')
     if password:
         err = _validate_password(password, models.get_security_settings())
         if err:
             return api_error(err)
     if is_active is not None and int(user_id) == int(session.get('user_id')):
         return api_error('Cannot deactivate your own account', 403)
-    result = models.update_user(user_id, password=password, role=role, is_active=is_active)
+    result = models.update_user(user_id, password=password, role=role, is_active=is_active, email=email)
     models.add_log('audit', f'User updated: {user_id}', username=current_username())
     return jsonify({'message': 'User updated'})
 
@@ -1421,6 +1449,74 @@ def delete_user_route(user_id):
         return api_error(result.get('error', 'Failed to delete user'))
     models.add_log('audit', f'User deleted: {user_id}', username=current_username())
     return jsonify({'message': 'User deleted'})
+
+
+# ─── User Invite ───────────────────────────────────────────────
+@app.route('/api/users/invite', methods=['POST'])
+@admin_required
+@csrf_required
+@json_body('username', 'email')
+def invite_user_route(data):
+    username = data['username'].strip()
+    email = data['email'].strip()
+    role = data.get('role', 'viewer')
+
+    if models.get_user_by_username(username):
+        return api_error('Username already exists')
+    if models.get_user_by_email(email):
+        return api_error('Email already in use')
+
+    settings = models.get_settings()
+    smtp_cfg = _resolve_smtp_config(settings)
+    if not smtp_cfg or not smtp_cfg.get('smtp_email') or not smtp_cfg.get('smtp_password'):
+        return api_error('SMTP is not configured — cannot send invite emails')
+
+    result = models.add_user(username, role=role, email=email)
+    if not result.get('ok'):
+        return api_error(result.get('error', 'Failed to create user'))
+
+    raw_token = models.create_invite_token(result['id'])
+    base_url = os.environ.get('APP_URL', request.host_url.rstrip('/'))
+    invite_url = f"{base_url}/invite/{raw_token}"
+
+    try:
+        send_invite_email(smtp_cfg, settings, email, invite_url, session.get('username', 'Admin'))
+    except Exception as e:
+        models.delete_user(result['id'], session.get('user_id'))
+        logger.exception("Failed to send invite email")
+        return api_error(f'Failed to send invite email: {e}')
+
+    models.add_log('audit', f'User invited: {username} ({email})', username=current_username())
+    return jsonify({'message': f'Invite sent to {email}'}), 201
+
+
+@app.route('/api/invite/<token>', methods=['GET'])
+def get_invite_info(token):
+    token_data = models.verify_invite_token(token)
+    if not token_data:
+        return api_error('Invalid or expired invite link', 404)
+    user = models.get_user(token_data['user_id'])
+    if not user:
+        return api_error('User not found', 404)
+    return jsonify({'valid': True, 'username': user['username']})
+
+
+@app.route('/api/invite/<token>', methods=['POST'])
+def accept_invite(token):
+    data = request.get_json(silent=True) or {}
+    password = data.get('password', '')
+    if not password:
+        return api_error('Password is required')
+
+    err = _validate_password(password, models.get_security_settings())
+    if err:
+        return api_error(err)
+
+    result = models.complete_invite(token, password)
+    if not result.get('ok'):
+        return api_error(result.get('error', 'Invalid or expired invite link'), 404)
+
+    return jsonify({'message': 'Password set successfully. You can now log in.'})
 
 
 # ─── Security Settings ─────────────────────────────────────────
@@ -1832,6 +1928,11 @@ def login_page():
 @login_required
 def dashboard():
     return send_from_directory(app.template_folder, 'index.html')
+
+
+@app.route('/invite/<token>')
+def invite_page(token):
+    return send_from_directory(app.template_folder, 'invite.html')
 
 
 # ─── Background scheduler ──────────────────────────────────────

@@ -59,6 +59,22 @@ DEFAULT_TEMPLATES = {
 </div>""",
         "body_text": "Domain Expiry Alert — {domain}\n\nDomain Registration\nStatus: {status}\nExpiry: {domain_expiry}\nDays Left: {domain_days_left}\nRegistrar: {registrar}\n\nSSL Certificate\nStatus: {status}\nExpiry: {ssl_expiry}\nDays Left: {ssl_days_left}\nIssuer: {issuer}\n\nSent by Vigil Monitoring",
     },
+    "invite_email": {
+        "subject": "[Vigil] You've been invited to Vigil",
+        "body_html": """<div style="font-family:sans-serif;max-width:600px;margin:auto;background:#fff">
+<h2 style="color:#3b82f6">You're Invited!</h2>
+<p><strong>{inviter}</strong> has invited you to join <strong>Vigil</strong> — a self-hosted monitoring platform for SSL certificates, domains, and web apps.</p>
+<p>Click the button below to set your password and activate your account:</p>
+<p style="text-align:center;margin:24px 0">
+<a href="{invite_url}" style="display:inline-block;padding:12px 24px;background:#3b82f6;color:#fff;text-decoration:none;border-radius:6px;font-weight:600">Accept Invitation</a>
+</p>
+<p>Or copy this link into your browser:</p>
+<p style="background:#f1f5f9;padding:12px;border-radius:4px;word-break:break-all;font-size:13px">{invite_url}</p>
+<p>This link expires in <strong>{expiry_hours} hours</strong>.</p>
+<p style="color:#64748b;font-size:12px">If you weren't expecting this invitation, you can ignore this email.</p>
+</div>""",
+        "body_text": "You've been invited to Vigil\n\n{inviter} has invited you to join Vigil.\n\nSet your password here: {invite_url}\n\nThis link expires in {expiry_hours} hours.\n\nIf you weren't expecting this invitation, you can ignore this email.",
+    },
     "check_complete": {
         "subject": "[Vigil] Scheduled Check Complete — {date}",
         "body_html": """<div style="font-family:sans-serif;max-width:600px;margin:auto;background:#fff">

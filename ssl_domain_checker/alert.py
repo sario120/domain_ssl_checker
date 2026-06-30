@@ -56,7 +56,7 @@ def _get_custom_templates(settings):
         data = json.loads(raw)
         if not isinstance(data, dict):
             return {}
-        for tpl in ("ssl_alert", "domain_alert", "webapp_alert", "check_complete"):
+        for tpl in ("ssl_alert", "domain_alert", "webapp_alert", "check_complete", "invite_email"):
             if tpl in data:
                 entry = data[tpl]
                 if not isinstance(entry, dict) or not any(k in entry for k in ("subject", "body_html", "body_text")):
@@ -170,6 +170,29 @@ def send_check_complete_summary(smtp_cfg, settings,
         _send_email(smtp_cfg, msg)
     except Exception as e:
         logger.warning("Failed to send check summary email: %s", e)
+
+
+def send_invite_email(smtp_cfg, settings, recipient_email, invite_url, inviter_name):
+    custom = _get_custom_templates(settings)
+    variables = {
+        "inviter": inviter_name,
+        "invite_url": invite_url,
+        "expiry_hours": str(models.INVITE_TOKEN_EXPIRY_HOURS),
+    }
+    if "invite_email" in custom:
+        subject = email_templates.render_template(custom["invite_email"].get("subject", ""), variables)
+        body_html = email_templates.render_template(custom["invite_email"].get("body_html", ""), variables)
+        body_text = email_templates.render_template(custom["invite_email"].get("body_text", ""), variables)
+    else:
+        subject, body_html, body_text = email_templates.render_email("invite_email", variables)
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = smtp_cfg["smtp_email"]
+    msg["To"] = recipient_email
+    msg.attach(MIMEText(body_text, "plain"))
+    msg.attach(MIMEText(body_html, "html"))
+    _send_email(smtp_cfg, msg)
 
 
 def test_smtp(smtp_cfg, settings):

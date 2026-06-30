@@ -171,7 +171,7 @@ document.addEventListener('click', (e) => {
   else if (action === 'manual-check') manualCheck(parseInt(btn.dataset.id));
   else if (action === 'edit-domain') openEditModal(parseInt(btn.dataset.id));
   else if (action === 'delete-domain') confirmDelete(parseInt(btn.dataset.id), btn.dataset.name, 'domain');
-  else if (action === 'edit-user') openEditUserModal(parseInt(btn.dataset.id), btn.dataset.name, btn.dataset.role);
+  else if (action === 'edit-user') openEditUserModal(parseInt(btn.dataset.id), btn.dataset.name, btn.dataset.role, btn.dataset.email);
   else if (action === 'delete-user') confirmDelete(parseInt(btn.dataset.id), btn.dataset.name, 'user');
   else if (action === 'view-cert') openCertModal(parseInt(btn.dataset.id));
   else if (action === 'cert-check-now') { const b = document.getElementById('cert-check-now-btn'); b.disabled = true; b.textContent = '\u231B Checking...'; manualCheck(_lastCertId); setTimeout(function() { b.disabled = false; b.textContent = '\u21bb Check Now'; }, 5000); }
@@ -256,6 +256,8 @@ document.addEventListener('click', (e) => {
   else if (action === 'refresh-email-templates') { loadEmailTemplates(true); }
   else if (action === 'toggle-quickadd') { openQuickAddModal(); }
   else if (action === 'close-quickadd-modal') { closeQuickAddModal(); }
+  else if (action === 'change-password') { openChgPwModal(); }
+  else if (action === 'close-chgpw-modal') { closeChgPwModal(); }
 
   // ─── Web Apps actions ──────────────────────────────────────────
   else if (action === 'toggle-actions-dropdown') {
@@ -4530,7 +4532,7 @@ async function loadUsers() {
   if (_usersLoaded) return;
   try {
     const tbody = document.getElementById('user-body');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="user-loading">Loading users...</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="user-loading">Loading users...</td></tr>';
     const users = await api('GET', '/api/users');
     _usersCache = users;
     renderUsers();
@@ -4561,7 +4563,7 @@ function filteredUsers() {
   return _usersCache.filter(u => {
     const role = u.role || 'admin';
     const active = u.is_active !== 0;
-    if (q && !String(u.username || '').toLowerCase().includes(q)) return false;
+    if (q && !String(u.username || '').toLowerCase().includes(q) && !String(u.email || '').toLowerCase().includes(q)) return false;
     if (_userFilters.role !== 'all' && role !== _userFilters.role) return false;
     if (_userFilters.status === 'active' && !active) return false;
     if (_userFilters.status === 'inactive' && active) return false;
@@ -4605,6 +4607,7 @@ function renderUsers() {
     const selfDisabled = isCurrent ? ' disabled' : '';
     return `<tr id="${rowId}">
       <td><div class="user-name-cell"><span>${escHtml(u.username)}</span>${currentBadge}<small>ID ${u.id}</small></div></td>
+      <td><span class="user-email">${escHtml(u.email || '—')}</span></td>
       <td><span class="role-badge ${role}">${role}</span></td>
       <td><span class="status-indicator ${activeClass}">${activeLabel}</span></td>
       <td>${lastLogin}</td>
@@ -4613,7 +4616,7 @@ function renderUsers() {
         <div class="kebab-menu">
           <button class="kebab-btn" data-action="toggle-kebab" data-id="${u.id}" aria-label="Actions">&#8942;</button>
           <div class="kebab-dropdown" id="kebab-user-${u.id}" style="display:none">
-            <button class="kebab-item" data-action="edit-user" data-id="${u.id}" data-name="${escHtml(u.username)}" data-role="${role}">&#x270E; Edit</button>
+            <button class="kebab-item" data-action="edit-user" data-id="${u.id}" data-name="${escHtml(u.username)}" data-email="${escHtml(u.email || '')}" data-role="${role}">&#x270E; Edit</button>
             <button class="kebab-item" data-action="toggle-user-active" data-id="${u.id}" data-name="${escHtml(u.username)}" data-active="${active ? '1' : '0'}"${selfDisabled}${selfTitle}>${active ? '&#10007; Deactivate' : '&#10003; Reactivate'}</button>
             <button class="kebab-item kebab-item-danger" data-action="delete-user" data-id="${u.id}" data-name="${escHtml(u.username)}"${selfDisabled}${selfTitle}>&#x2716; Delete</button>
           </div>
@@ -4623,28 +4626,65 @@ function renderUsers() {
   }).join('');
 }
 
+let _userInviteMode = true;
+
+function switchUserMode(mode) {
+  const pwSection = document.getElementById('user-password-section');
+  const toggleRow = document.getElementById('user-invite-toggle');
+  const toggleLink = document.getElementById('user-invite-toggle-link');
+  const btn = document.getElementById('btn-save-user');
+  const pwInput = document.getElementById('user-password');
+  const emailHint = document.getElementById('user-email-hint');
+
+  _userInviteMode = mode === 'invite';
+  if (_userInviteMode) {
+    pwSection.style.display = 'none';
+    toggleRow.style.display = '';
+    toggleLink.textContent = 'Set password manually';
+    toggleLink.href = '#';
+    btn.textContent = 'Send Invite';
+    pwInput.required = false;
+    emailHint.textContent = 'Invite email will be sent to this address';
+  } else {
+    pwSection.style.display = '';
+    toggleRow.style.display = '';
+    toggleLink.textContent = 'Send invite email instead';
+    toggleLink.href = '#';
+    btn.textContent = 'Create User';
+    pwInput.required = true;
+    emailHint.textContent = '';
+  }
+}
+
 function openUserModal() {
   document.getElementById('user-modal-title').textContent = 'Add User';
   document.getElementById('user-id').value = '';
   document.getElementById('user-form').reset();
   document.getElementById('user-username').disabled = false;
   document.getElementById('user-username-hint').textContent = '';
-  document.getElementById('user-password').required = true;
+  document.getElementById('user-email').value = '';
+  document.getElementById('user-email').required = true;
+  document.getElementById('user-email-hint').textContent = 'Invite email will be sent to this address';
+  document.getElementById('user-password').value = '';
   document.getElementById('user-password').placeholder = '';
   document.getElementById('user-role').value = 'viewer';
   document.getElementById('pw-strength-fill').className = 'pw-strength-fill';
   document.getElementById('pw-strength-label').textContent = '';
   document.querySelectorAll('.pw-req').forEach(r => r.classList.remove('met'));
+  switchUserMode('invite');
   document.getElementById('user-modal').classList.add('open');
   document.getElementById('user-username').focus();
 }
 
-function openEditUserModal(id, username, role) {
+function openEditUserModal(id, username, role, email) {
   document.getElementById('user-modal-title').textContent = `Edit User: ${username}`;
   document.getElementById('user-id').value = id;
   document.getElementById('user-username').value = username;
   document.getElementById('user-username').disabled = true;
   document.getElementById('user-username-hint').textContent = 'Usernames cannot be changed after creation.';
+  document.getElementById('user-email').value = email || '';
+  document.getElementById('user-email').required = false;
+  document.getElementById('user-email-hint').textContent = '';
   document.getElementById('user-password').value = '';
   document.getElementById('user-password').required = false;
   document.getElementById('user-password').placeholder = 'Leave blank to keep current';
@@ -4652,6 +4692,9 @@ function openEditUserModal(id, username, role) {
   document.getElementById('pw-strength-fill').className = 'pw-strength-fill';
   document.getElementById('pw-strength-label').textContent = '';
   document.querySelectorAll('.pw-req').forEach(r => r.classList.remove('met'));
+  document.getElementById('user-password-section').style.display = '';
+  document.getElementById('user-invite-toggle').style.display = 'none';
+  document.getElementById('btn-save-user').textContent = 'Save';
   document.getElementById('user-modal').classList.add('open');
 }
 
@@ -4664,6 +4707,7 @@ document.getElementById('user-form').addEventListener('submit', async (e) => {
   const btn = document.getElementById('btn-save-user');
   const id = document.getElementById('user-id').value;
   const username = document.getElementById('user-username').value.trim();
+  const email = document.getElementById('user-email').value.trim();
   const password = document.getElementById('user-password').value;
   const role = document.getElementById('user-role').value;
 
@@ -4677,17 +4721,106 @@ document.getElementById('user-form').addEventListener('submit', async (e) => {
     if (id) {
       const body = { role };
       if (password) { body.password = password; }
+      if (email) { body.email = email; }
       await api('PUT', `/api/users/${id}`, body);
       toast('User updated');
+    } else if (_userInviteMode) {
+      if (!email) { toast('Email is required for invite'); setLoading(btn, false); return; }
+      await api('POST', '/api/users/invite', { username, email, role });
+      toast(`Invite sent to ${email}`);
     } else {
-      if (!password) { toast('Password required'); return; }
-      await api('POST', '/api/users', { username, password, role });
+      if (!password) { toast('Password required'); setLoading(btn, false); return; }
+      if (!email) { toast('Email is required'); setLoading(btn, false); return; }
+      await api('POST', '/api/users', { username, password, role, email });
       toast('User created');
     }
     closeUserModal();
     _usersLoaded = false;
     loadUsers();
     try { await api('POST', '/api/logs', { message: `User ${id ? 'updated' : 'created'}: ${username}`, type: 'settings_change' }); } catch {}
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    setLoading(btn, false);
+  }
+});
+
+document.getElementById('user-invite-toggle-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  switchUserMode(_userInviteMode ? 'direct' : 'invite');
+});
+
+// ─── Change Password ────────────────────────────────────────────
+function openChgPwModal() {
+  document.getElementById('chgpw-form').reset();
+  document.getElementById('cp-pw-strength').style.display = 'none';
+  document.getElementById('cp-pw-strength-fill').className = 'pw-strength-fill';
+  document.getElementById('cp-pw-strength-label').textContent = '';
+  document.querySelectorAll('#cp-pw-requirements .pw-req').forEach(r => r.classList.remove('met'));
+  document.getElementById('chgpw-modal').classList.add('open');
+  document.getElementById('chgpw-current').focus();
+}
+
+function closeChgPwModal() {
+  document.getElementById('chgpw-modal').classList.remove('open');
+}
+
+document.getElementById('chgpw-new').addEventListener('input', (e) => {
+  const pw = e.target.value;
+  document.getElementById('cp-pw-strength').style.display = pw ? '' : 'none';
+  const fill = document.getElementById('cp-pw-strength-fill');
+  const label = document.getElementById('cp-pw-strength-label');
+  const reqs = document.querySelectorAll('#cp-pw-requirements .pw-req');
+
+  if (!pw) { fill.className = 'pw-strength-fill'; label.textContent = ''; reqs.forEach(r => r.classList.remove('met')); return; }
+
+  let score = 0;
+  const hasUpper = /[A-Z]/.test(pw);
+  const hasLower = /[a-z]/.test(pw);
+  const hasNumber = /\d/.test(pw);
+  const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pw);
+  const meetsLen = pw.length >= _pwPolicy.minLength;
+
+  if (meetsLen) score++;
+  if (hasUpper && _pwPolicy.requireUpper) score++;
+  if (hasLower && _pwPolicy.requireLower) score++;
+  if (hasNumber && _pwPolicy.requireNumber) score++;
+  if (hasSpecial && _pwPolicy.requireSpecial) score++;
+
+  const total = 1 + (_pwPolicy.requireUpper ? 1 : 0) + (_pwPolicy.requireLower ? 1 : 0) + (_pwPolicy.requireNumber ? 1 : 0) + (_pwPolicy.requireSpecial ? 1 : 0);
+  const pct = score / total;
+
+  fill.className = 'pw-strength-fill';
+  if (pct <= 0.3) { fill.classList.add('weak'); label.textContent = 'Weak'; }
+  else if (pct <= 0.5) { fill.classList.add('fair'); label.textContent = 'Fair'; }
+  else if (pct <= 0.75) { fill.classList.add('good'); label.textContent = 'Good'; }
+  else { fill.classList.add('strong'); label.textContent = 'Strong'; }
+
+  document.querySelector('#cp-pw-requirements [data-req="length"]').classList.toggle('met', meetsLen);
+  document.querySelector('#cp-pw-requirements [data-req="upper"]').classList.toggle('met', hasUpper);
+  document.querySelector('#cp-pw-requirements [data-req="lower"]').classList.toggle('met', hasLower);
+  document.querySelector('#cp-pw-requirements [data-req="number"]').classList.toggle('met', hasNumber);
+  document.querySelector('#cp-pw-requirements [data-req="special"]').classList.toggle('met', hasSpecial);
+});
+
+document.getElementById('chgpw-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('btn-chgpw-save');
+  const current = document.getElementById('chgpw-current').value;
+  const newPw = document.getElementById('chgpw-new').value;
+  const confirm = document.getElementById('chgpw-confirm').value;
+
+  if (!current || !newPw || !confirm) { toast('All fields are required', 'error'); return; }
+  if (newPw !== confirm) { toast('New passwords do not match', 'error'); return; }
+
+  const errors = validatePassword(newPw);
+  if (errors.length > 0) { toast('Password: ' + errors.join(', '), 'error'); return; }
+
+  setLoading(btn, true);
+  try {
+    await api('PUT', '/api/me/password', { current_password: current, new_password: newPw });
+    toast('Password changed successfully');
+    closeChgPwModal();
   } catch (e) {
     toast(e.message, 'error');
   } finally {
