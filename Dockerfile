@@ -19,7 +19,10 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL -o /usr/local/bin/gosu \
+        "https://github.com/tianon/gosu/releases/download/1.17/gosu-$(dpkg --print-architecture)" && \
+    chmod +x /usr/local/bin/gosu
 
 # Create non-root user
 RUN addgroup --system --gid 1000 vigil && \
@@ -37,6 +40,10 @@ COPY gunicorn.conf.py /app/gunicorn.conf.py
 RUN mkdir -p /app/data_volume /app/backups && \
     chown -R vigil:vigil /app
 
+# Copy entrypoint (runs as root to fix volume perms, then drops to vigil)
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Environment defaults
 ENV HOME=/app
 ENV PYTHONUNBUFFERED=1
@@ -46,11 +53,10 @@ ENV DB_PATH=/app/data_volume/ssl_checker.db
 ENV BACKUP_DIR=/app/backups
 ENV MAX_BACKUPS=30
 
-USER vigil
-
 EXPOSE 5000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD curl -f http://localhost:5000/api/health || exit 1
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["gunicorn", "-c", "gunicorn.conf.py", "app:app"]
