@@ -1186,17 +1186,18 @@ def add_user(username, password=None, role="user", email=None):
     conn = get_db()
     try:
         if password:
-            conn.execute(
-                "INSERT INTO users (username, email, password, role, is_active) VALUES (?, ?, ?, ?, ?)",
+            cur = conn.execute(
+                "INSERT INTO users (username, email, password, role, is_active) VALUES (?, ?, ?, ?, ?) RETURNING id",
                 (username, email, generate_password_hash(password), role, True)
             )
         else:
-            conn.execute(
-                "INSERT INTO users (username, email, password, role, is_active) VALUES (?, ?, ?, ?, ?)",
+            cur = conn.execute(
+                "INSERT INTO users (username, email, password, role, is_active) VALUES (?, ?, ?, ?, ?) RETURNING id",
                 (username, email, '', role, False)
             )
+        new_id = cur.fetchone()['id']
         conn.commit()
-        return {"ok": True}
+        return {"ok": True, "id": new_id}
     except Exception as e:
         if db.is_integrity_error(e):
             conn.rollback()
