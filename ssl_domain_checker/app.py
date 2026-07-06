@@ -573,9 +573,9 @@ def import_domains():
     import io
 
     items = []
-    default_txt_type = request.args.get('type', 'full')
-    if default_txt_type not in ('full', 'ssl_only'):
-        default_txt_type = 'full'
+    default_txt_type = request.args.get('type')
+    if default_txt_type and default_txt_type not in ('full', 'ssl_only'):
+        return api_error('Invalid type parameter (use full or ssl_only)')
 
     # Detect format: JSON body, JSON file, CSV file, or TXT file
     if request.files:
@@ -588,16 +588,19 @@ def import_domains():
                 for row in reader:
                     url = row.get('url', '').strip()
                     if url:
-                        items.append({
-                            'url': url,
-                            'type': row.get('type', row.get('domain_type', 'full')),
-                            'notes': row.get('notes', ''),
-                        })
+                        item = {'url': url, 'notes': row.get('notes', '')}
+                        t = row.get('type', row.get('domain_type'))
+                        if t:
+                            item['type'] = t
+                        items.append(item)
             elif filename.endswith('.txt'):
                 for line in raw.strip().splitlines():
                     line = line.strip()
                     if line and not line.startswith('#'):
-                        items.append({'url': line, 'type': default_txt_type, 'notes': ''})
+                        item = {'url': line, 'notes': ''}
+                        if default_txt_type:
+                            item['type'] = default_txt_type
+                        items.append(item)
             else:
                 try:
                     parsed = json.loads(raw)
@@ -624,7 +627,9 @@ def import_domains():
         if not models.is_valid_domain(url):
             results['errors'].append(f'{url}: invalid domain format')
             continue
-        domain_type = item.get('type', item.get('domain_type', 'full')) if isinstance(item, dict) else 'full'
+        domain_type = item.get('type', item.get('domain_type')) if isinstance(item, dict) else None
+        if not domain_type:
+            domain_type = default_txt_type or models.infer_domain_type(url)
         if domain_type not in ('full', 'ssl_only'):
             domain_type = 'full'
         r = models.add_domain(url, domain_type, item.get('notes', '') if isinstance(item, dict) else '')

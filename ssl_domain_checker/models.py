@@ -101,6 +101,50 @@ def is_valid_domain(url):
     )    )
 
 
+_MULTI_TLD = frozenset({
+    'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'net.uk', 'me.uk', 'ltd.uk', 'plc.uk',
+    'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au', 'asn.au', 'id.au',
+    'co.nz', 'org.nz', 'net.nz', 'govt.nz', 'ac.nz', 'gen.nz',
+    'co.jp', 'or.jp', 'ne.jp', 'ac.jp', 'go.jp', 'ed.jp',
+    'com.br', 'org.br', 'net.br', 'gov.br', 'edu.br',
+    'co.in', 'org.in', 'net.in', 'gov.in', 'ac.in',
+    'co.za', 'org.za', 'net.za', 'gov.za', 'ac.za',
+    'co.il', 'org.il', 'net.il', 'ac.il', 'gov.il',
+    'com.sg', 'org.sg', 'net.sg', 'gov.sg', 'edu.sg',
+    'com.hk', 'org.hk', 'net.hk', 'gov.hk', 'edu.hk',
+    'com.mx', 'org.mx', 'net.mx', 'gob.mx',
+    'co.kr', 'or.kr', 'ne.kr', 'go.kr',
+    'com.cn', 'org.cn', 'net.cn', 'gov.cn',
+    'com.ar', 'net.ar', 'org.ar', 'gov.ar',
+    'com.tr', 'org.tr', 'net.tr', 'gov.tr', 'edu.tr',
+    'com.pt', 'org.pt', 'net.pt', 'gov.pt',
+    'co.at', 'or.at', 'ac.at',
+    'co.id', 'or.id', 'ac.id', 'net.id', 'go.id',
+    'com.ua', 'org.ua', 'net.ua', 'gov.ua',
+    'com.eg', 'org.eg', 'net.eg', 'gov.eg',
+    'co.th', 'or.th', 'net.th', 'go.th', 'ac.th',
+    'com.tw', 'org.tw', 'net.tw', 'gov.tw',
+    'com.vn', 'org.vn', 'net.vn', 'gov.vn',
+    'co.gg', 'net.gg', 'org.gg',
+    'co.je', 'net.je', 'org.je',
+})
+
+def infer_domain_type(hostname):
+    hostname = parse_hostname(hostname)
+    parts = hostname.lower().split('.')
+    if len(parts) < 2:
+        return 'full'
+    if len(parts) >= 2:
+        last_two = '.'.join(parts[-2:])
+        if last_two in _MULTI_TLD:
+            if len(parts) == 3:
+                return 'full'
+            return 'ssl_only'
+    if len(parts) == 2:
+        return 'full'
+    return 'ssl_only'
+
+
 def normalise_url(url):
     url = url.strip()
     if url.startswith(('http://', 'https://')):
@@ -1143,13 +1187,13 @@ def add_user(username, password=None, role="user", email=None):
     try:
         if password:
             conn.execute(
-                "INSERT INTO users (username, email, password, role, is_active) VALUES (?, ?, ?, ?, 1)",
-                (username, email, generate_password_hash(password), role)
+                "INSERT INTO users (username, email, password, role, is_active) VALUES (?, ?, ?, ?, ?)",
+                (username, email, generate_password_hash(password), role, True)
             )
         else:
             conn.execute(
-                "INSERT INTO users (username, email, password, role, is_active) VALUES (?, ?, ?, ?, 0)",
-                (username, email, '', role)
+                "INSERT INTO users (username, email, password, role, is_active) VALUES (?, ?, ?, ?, ?)",
+                (username, email, '', role, False)
             )
         conn.commit()
         return {"ok": True}
