@@ -4,6 +4,7 @@ import shutil
 import atexit
 from models import is_valid_domain, add_domain, get_domain, delete_domain
 from models import init_db, init_settings, get_settings, update_settings, get_security_settings, close_db
+from models import add_user, get_users, get_user, update_user, delete_user, count_admins
 
 
 _test_dirs = []
@@ -80,6 +81,82 @@ class TestCrud:
         assert get_domain(domain_id) is not None
         delete_domain(domain_id)
         assert get_domain(domain_id) is None
+
+
+class TestUsers:
+    def setup_method(self):
+        _init_test_db()
+
+    def test_add_user_with_password(self):
+        result = add_user("alice", password="Str0ng!Pass", role="user", email="alice@example.com")
+        assert result["ok"] is True
+        user = get_user(result["id"])
+        assert user["username"] == "alice"
+        assert user["email"] == "alice@example.com"
+        assert user["role"] == "user"
+        assert user["is_active"] == 1
+
+    def test_add_user_without_password_is_inactive(self):
+        result = add_user("bob", role="viewer", email="bob@example.com")
+        assert result["ok"] is True
+        user = get_user(result["id"])
+        assert user["is_active"] == 0
+
+    def test_add_duplicate_user_fails(self):
+        add_user("alice", password="Str0ng!Pass")
+        result = add_user("alice", password="Other!Pass1")
+        assert result["ok"] is False
+        assert "already exists" in result.get("error", "")
+
+    def test_get_users(self):
+        add_user("alice", password="Str0ng!Pass")
+        add_user("bob", password="Str0ng!Pass")
+        users = get_users()
+        assert len(users) >= 2
+        usernames = [u["username"] for u in users]
+        assert "alice" in usernames
+        assert "bob" in usernames
+
+    def test_update_user_role(self):
+        result = add_user("alice", password="Str0ng!Pass", role="user")
+        update_user(result["id"], role="admin")
+        user = get_user(result["id"])
+        assert user["role"] == "admin"
+
+    def test_update_user_deactivate(self):
+        result = add_user("alice", password="Str0ng!Pass")
+        update_user(result["id"], is_active=False)
+        user = get_user(result["id"])
+        assert user["is_active"] == 0
+
+    def test_update_user_reactivate(self):
+        result = add_user("alice", password="Str0ng!Pass")
+        update_user(result["id"], is_active=True)
+        user = get_user(result["id"])
+        assert user["is_active"] == 1
+
+    def test_delete_user(self):
+        result = add_user("alice", password="Str0ng!Pass")
+        user_id = result["id"]
+        assert get_user(user_id) is not None
+        delete_user(user_id, current_user_id=999)
+        assert get_user(user_id) is None
+
+    def test_delete_self_fails(self):
+        result = add_user("alice", password="Str0ng!Pass")
+        resp = delete_user(result["id"], current_user_id=result["id"])
+        assert resp["ok"] is False
+        assert "Cannot delete yourself" in resp.get("error", "")
+
+    def test_count_admins_default(self):
+        # Default init creates one admin
+        assert count_admins() == 1
+
+    def test_count_admins_after_promotion(self):
+        result = add_user("alice", password="Str0ng!Pass", role="user")
+        assert count_admins() == 1
+        update_user(result["id"], role="admin")
+        assert count_admins() == 2
 
 
 class TestSettings:

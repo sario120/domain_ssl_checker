@@ -101,6 +101,8 @@ if os.environ.get('HTTPS', '1') == '1':
 MAX_SESSION_HOURS = 4
 _session_timeout_hours = min(int(os.environ.get('SESSION_LIFETIME_HOURS', '24')), MAX_SESSION_HOURS)
 app.config['PERMANENT_SESSION_LIFETIME'] = _session_timeout_hours * 3600
+if os.environ.get('FLASK_DEBUG', '0') == '1' or os.environ.get('PYTEST_VERSION'):
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 models.init_db()
 models.init_settings()
@@ -1403,7 +1405,9 @@ def change_my_password():
 @admin_required
 def list_users():
     users = models.get_users()
-    return jsonify(users)
+    resp = jsonify(users)
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
 
 
 @app.route('/api/users', methods=['POST'])
@@ -1438,8 +1442,21 @@ def update_user_route(user_id):
         err = _validate_password(password, models.get_security_settings())
         if err:
             return api_error(err)
-    if is_active is not None and int(user_id) == int(session.get('user_id')):
-        return api_error('Cannot deactivate your own account', 403)
+
+    is_self = int(user_id) == int(session.get('user_id'))
+
+    if is_active is not None and is_self:
+        return api_error('Cannot change your own account status', 403)
+
+    if role is not None:
+        user = models.get_user(user_id)
+        if not user:
+            return api_error('User not found', 404)
+        if is_self and role != 'admin':
+            return api_error('Cannot demote your own role', 403)
+        if user.get('role') == 'admin' and role != 'admin' and models.count_admins() <= 1:
+            return api_error('Cannot remove the last admin', 403)
+
     result = models.update_user(user_id, password=password, role=role, is_active=is_active, email=email)
     models.add_log('audit', f'User updated: {user_id}', username=current_username())
     return jsonify({'message': 'User updated'})
@@ -1449,6 +1466,15 @@ def update_user_route(user_id):
 @admin_required
 @csrf_required
 def delete_user_route(user_id):
+    if int(user_id) == int(session.get('user_id')):
+        return api_error('Cannot delete your own account', 403)
+
+    user = models.get_user(user_id)
+    if not user:
+        return api_error('User not found', 404)
+    if user.get('role') == 'admin' and models.count_admins() <= 1:
+        return api_error('Cannot delete the last admin', 403)
+
     result = models.delete_user(user_id, session.get('user_id'))
     if not result.get('ok'):
         return api_error(result.get('error', 'Failed to delete user'))
@@ -1493,6 +1519,42 @@ def invite_user_route(data):
 
     models.add_log('audit', f'User invited: {username} ({email})', username=current_username())
     return jsonify({'message': f'Invite sent to {email}'}), 201
+
+
+@app.route('/api/users/<int:user_id>/resend-invite', methods=['POST'])
+@admin_required
+@csrf_required
+def resend_invite_route(user_id):
+    user = models.get_user(user_id)
+    if not user:
+        return api_error('User not found', 404)
+    if user.get('is_active') or user.get('email') is None:
+        return api_error('User is already active or has no email', 400)
+
+    full_user = models.get_user_by_username(user['username'])
+    if not full_user:
+        return api_error('User not found', 404)
+    if full_user.get('password'):
+        return api_error('User already has a password set — not an invited user', 400)
+
+    settings = models.get_settings()
+    smtp_cfg = _resolve_smtp_config(settings)
+    if not smtp_cfg or not smtp_cfg.get('smtp_email') or not smtp_cfg.get('smtp_password'):
+        return api_error('SMTP is not configured — cannot send invite emails')
+
+    models.invalidate_user_invite_tokens(user_id)
+    raw_token = models.create_invite_token(user_id)
+    base_url = os.environ.get('APP_URL', request.host_url.rstrip('/'))
+    invite_url = f"{base_url}/invite/{raw_token}"
+
+    try:
+        send_invite_email(smtp_cfg, settings, user['email'], invite_url, session.get('username', 'Admin'))
+    except Exception as e:
+        logger.exception("Failed to resend invite email")
+        return api_error(f'Failed to resend invite email: {e}')
+
+    models.add_log('audit', f'Invite resent: {user["username"]} ({user["email"]})', username=current_username())
+    return jsonify({'message': f'Invite resent to {user["email"]}'})
 
 
 @app.route('/api/invite/<token>', methods=['GET'])

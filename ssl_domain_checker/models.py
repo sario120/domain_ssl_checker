@@ -1160,8 +1160,13 @@ def get_logs_activity(date_str=None):
 
 def get_users():
     conn = get_db()
-    rows = conn.execute("SELECT id, username, email, role, login_fails, last_login, created_at, is_active FROM users ORDER BY username").fetchall()
-    return [dict(r) for r in rows]
+    rows = conn.execute("SELECT id, username, email, role, login_fails, last_login, created_at, is_active, password FROM users ORDER BY username").fetchall()
+    users = []
+    for r in rows:
+        u = dict(r)
+        u['has_password'] = bool(u.pop('password'))
+        users.append(u)
+    return users
 
 
 def get_user_by_username(username):
@@ -1249,6 +1254,15 @@ def create_invite_token(user_id):
     )
     conn.commit()
     return raw
+
+
+def invalidate_user_invite_tokens(user_id):
+    conn = get_db()
+    conn.execute(
+        "UPDATE invite_tokens SET used_at=? WHERE user_id=? AND used_at IS NULL",
+        (timezone_now_str(), user_id)
+    )
+    conn.commit()
 
 
 def verify_invite_token(raw_token):
@@ -1567,6 +1581,11 @@ def get_dashboard_summary():
         'webapp_uptime_24h': webapp_uptime_24h,
         'webapp_avg_response_time': webapp_avg_rt,
     }
+
+
+def count_admins():
+    conn = get_db()
+    return conn.execute("SELECT COUNT(*) AS cnt FROM users WHERE role='admin'").fetchone()['cnt']
 
 
 def count_users():

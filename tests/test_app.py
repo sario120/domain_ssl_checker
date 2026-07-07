@@ -235,6 +235,129 @@ class TestAppRoutes:
         resp2 = self.client.get(f"/api/domains/{did}/cert")
         assert resp2.status_code == 404
 
+    # ─── User CRUD ───────────────────────────────────────────────
+    def test_list_users(self):
+        self._login()
+        resp = self.client.get("/api/users")
+        assert resp.status_code == 200
+        users = resp.get_json()
+        assert len(users) >= 1
+        assert users[0]["username"] == "admin"
+
+    def test_create_user(self):
+        self._login()
+        headers = self._auth_headers()
+        headers["Content-Type"] = "application/json"
+        resp = self.client.post("/api/users", json={
+            "username": "newuser", "password": "Str0ng!Pass", "role": "user", "email": "user@test.com"
+        }, headers=headers)
+        assert resp.status_code == 201
+        users = self.client.get("/api/users").get_json()
+        assert any(u["username"] == "newuser" for u in users)
+
+    def test_create_user_duplicate(self):
+        self._login()
+        headers = self._auth_headers()
+        headers["Content-Type"] = "application/json"
+        self.client.post("/api/users", json={
+            "username": "dupuser", "password": "Str0ng!Pass", "role": "user", "email": "dup@test.com"
+        }, headers=headers)
+        headers2 = self._auth_headers()
+        headers2["Content-Type"] = "application/json"
+        resp = self.client.post("/api/users", json={
+            "username": "dupuser", "password": "Str0ng!Pass2", "role": "user", "email": "dup2@test.com"
+        }, headers=headers2)
+        assert resp.status_code == 400
+
+    def test_create_user_missing_password(self):
+        self._login()
+        headers = self._auth_headers()
+        headers["Content-Type"] = "application/json"
+        resp = self.client.post("/api/users", json={"username": "nopass"}, headers=headers)
+        assert resp.status_code == 400
+
+    def test_update_user_role(self):
+        self._login()
+        headers = self._auth_headers()
+        headers["Content-Type"] = "application/json"
+        add = self.client.post("/api/users", json={
+            "username": "update-role", "password": "Str0ng!Pass", "role": "user", "email": "role@test.com"
+        }, headers=headers)
+        uid = add.get_json()["message"]
+        # Find the user id
+        users = self.client.get("/api/users").get_json()
+        target = [u for u in users if u["username"] == "update-role"][0]
+        resp = self.client.put(f"/api/users/{target['id']}", json={"role": "admin"},
+                               headers=self._auth_headers())
+        assert resp.status_code == 200
+
+    def test_self_demote_fails(self):
+        self._login()
+        resp = self.client.put("/api/users/1", json={"role": "user"},
+                               headers=self._auth_headers())
+        assert resp.status_code == 403
+        assert "Cannot demote your own role" in resp.get_json()["error"]
+
+    def test_self_deactivate_fails(self):
+        self._login()
+        resp = self.client.put("/api/users/1", json={"is_active": False},
+                               headers=self._auth_headers())
+        assert resp.status_code == 403
+
+    def test_self_delete_fails(self):
+        self._login()
+        resp = self.client.delete("/api/users/1", headers=self._auth_headers())
+        assert resp.status_code == 403
+
+    def test_deactivate_user(self):
+        self._login()
+        headers = self._auth_headers()
+        headers["Content-Type"] = "application/json"
+        add = self.client.post("/api/users", json={
+            "username": "deact-me", "password": "Str0ng!Pass", "role": "user", "email": "deact@test.com"
+        }, headers=headers)
+        users = self.client.get("/api/users").get_json()
+        target = [u for u in users if u["username"] == "deact-me"][0]
+        assert target["is_active"] == 1
+        resp = self.client.put(f"/api/users/{target['id']}", json={"is_active": False},
+                               headers=self._auth_headers())
+        assert resp.status_code == 200
+        users = self.client.get("/api/users").get_json()
+        updated = [u for u in users if u["username"] == "deact-me"][0]
+        assert updated["is_active"] == 0
+
+    def test_reactivate_user(self):
+        self._login()
+        headers = self._auth_headers()
+        headers["Content-Type"] = "application/json"
+        add = self.client.post("/api/users", json={
+            "username": "react-me", "password": "Str0ng!Pass", "role": "user", "email": "react@test.com"
+        }, headers=headers)
+        users = self.client.get("/api/users").get_json()
+        target = [u for u in users if u["username"] == "react-me"][0]
+        # Deactivate first
+        self.client.put(f"/api/users/{target['id']}", json={"is_active": False},
+                        headers=self._auth_headers())
+        # Reactivate
+        resp = self.client.put(f"/api/users/{target['id']}", json={"is_active": True},
+                               headers=self._auth_headers())
+        assert resp.status_code == 200
+        users = self.client.get("/api/users").get_json()
+        updated = [u for u in users if u["username"] == "react-me"][0]
+        assert updated["is_active"] == 1
+
+    def test_delete_last_admin_fails(self):
+        self._login()
+        resp = self.client.delete("/api/users/1", headers=self._auth_headers())
+        assert resp.status_code == 403
+
+    def test_demote_last_admin_fails(self):
+        self._login()
+        resp = self.client.put("/api/users/1", json={"role": "user"},
+                               headers=self._auth_headers())
+        assert resp.status_code == 403
+        assert "Cannot demote your own role" in resp.get_json()["error"]
+
     # ─── Cert details ───────────────────────────────────────────
     def test_cert_details_no_domain(self):
         self._login()

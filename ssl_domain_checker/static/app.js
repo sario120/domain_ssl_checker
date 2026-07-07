@@ -123,6 +123,7 @@ document.addEventListener('click', (e) => {
   else if (action === 'refresh-users') refreshUsers();
   else if (action === 'clear-user-filters') clearUserFilters();
   else if (action === 'toggle-user-active') toggleUserActive(parseInt(btn.dataset.id), btn.dataset.name, btn.dataset.active === '1');
+  else if (action === 'resend-invite') resendInvite(parseInt(btn.dataset.id), btn.dataset.name);
   else if (action === 'refresh-logs') refreshLogs();
   else if (action === 'clear-logs') {
     if (!confirm('Delete ALL activity logs? This cannot be undone.')) return;
@@ -1210,6 +1211,9 @@ async function api(method, path, body) {
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
+  }
+  if (method === 'GET') {
+    opts.cache = 'no-store';
   }
   if (method !== 'GET') {
     if (!_csrfToken) {
@@ -4528,12 +4532,19 @@ document.getElementById('email-tpl-form').addEventListener('submit', async (e) =
 
 
 // ─── Users ─────────────────────────────────────────────────────
-async function loadUsers() {
-  if (_usersLoaded) return;
+async function loadUsers(force) {
+  if (!force && _usersLoaded) return;
+  _usersLoaded = false;
   try {
     const tbody = document.getElementById('user-body');
     if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="user-loading">Loading users...</td></tr>';
-    const users = await api('GET', '/api/users');
+    const cacheKey = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    const res = await fetch('/api/users?_=' + cacheKey, {
+      method: 'GET', cache: 'no-store',
+      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+    });
+    if (!res.ok) { let d; try { d = await res.json(); } catch {}; throw new Error((d && d.error) || 'Failed to load users'); }
+    const users = await res.json();
     _usersCache = users;
     renderUsers();
     _usersLoaded = true;
@@ -4543,8 +4554,7 @@ async function loadUsers() {
 }
 
 function refreshUsers() {
-  _usersLoaded = false;
-  loadUsers();
+  loadUsers(true);
 }
 
 function clearUserFilters() {
@@ -4562,7 +4572,7 @@ function filteredUsers() {
   const q = _userFilters.search.toLowerCase();
   return _usersCache.filter(u => {
     const role = u.role || 'admin';
-    const active = u.is_active !== 0;
+    const active = u.is_active !== 0 && u.is_active !== false;
     if (q && !String(u.username || '').toLowerCase().includes(q) && !String(u.email || '').toLowerCase().includes(q)) return false;
     if (_userFilters.role !== 'all' && role !== _userFilters.role) return false;
     if (_userFilters.status === 'active' && !active) return false;
@@ -4574,7 +4584,7 @@ function filteredUsers() {
 function renderUserSummary(users) {
   users = users || [];
   const admins = users.filter(u => (u.role || 'admin') === 'admin').length;
-  const active = users.filter(u => u.is_active !== 0).length;
+  const active = users.filter(u => u.is_active !== 0 && u.is_active !== false).length;
   const risks = users.filter(u => (u.login_fails || 0) > 0).length;
   const set = (id, value) => {
     const el = document.getElementById(id);
@@ -4598,7 +4608,7 @@ function renderUsers() {
     const role = u.role || 'admin';
     const lastLogin = u.last_login ? formatDate(u.last_login) : 'Never';
     const fails = u.login_fails || 0;
-    const active = u.is_active !== 0;
+    const active = u.is_active !== 0 && u.is_active !== false;
     const activeLabel = active ? 'Active' : 'Inactive';
     const activeClass = active ? 'active' : 'inactive';
     const isCurrent = u.username === _currentUsername;
@@ -4618,6 +4628,7 @@ function renderUsers() {
           <div class="kebab-dropdown" id="kebab-user-${u.id}" style="display:none">
             <button class="kebab-item" data-action="edit-user" data-id="${u.id}" data-name="${escHtml(u.username)}" data-email="${escHtml(u.email || '')}" data-role="${role}">&#x270E; Edit</button>
             <button class="kebab-item" data-action="toggle-user-active" data-id="${u.id}" data-name="${escHtml(u.username)}" data-active="${active ? '1' : '0'}"${selfDisabled}${selfTitle}>${active ? '&#10007; Deactivate' : '&#10003; Reactivate'}</button>
+            ${(!u.has_password && !active) ? '<button class="kebab-item" data-action="resend-invite" data-id="' + u.id + '" data-name="' + escHtml(u.username) + '">&#x2709; Resend Invite</button>' : ''}
             <button class="kebab-item kebab-item-danger" data-action="delete-user" data-id="${u.id}" data-name="${escHtml(u.username)}"${selfDisabled}${selfTitle}>&#x2716; Delete</button>
           </div>
         </div>
@@ -4735,8 +4746,7 @@ document.getElementById('user-form').addEventListener('submit', async (e) => {
       toast('User created');
     }
     closeUserModal();
-    _usersLoaded = false;
-    loadUsers();
+    loadUsers(true);
     try { await api('POST', '/api/logs', { message: `User ${id ? 'updated' : 'created'}: ${username}`, type: 'settings_change' }); } catch {}
   } catch (e) {
     toast(e.message, 'error');
@@ -4885,8 +4895,7 @@ document.getElementById('confirm-delete-btn').addEventListener('click', async ()
     if (_confirmDeleteType === 'user') {
       await api('DELETE', `/api/users/${id}`);
       toast(`User ${name} deleted`);
-      _usersLoaded = false;
-      loadUsers();
+      loadUsers(true);
     } else {
       const type = activeView === 'sslcerts' ? 'ssl_only' : 'full';
       await new Promise(r => setTimeout(r, 350));
@@ -4927,13 +4936,26 @@ function deleteUser(id, username) {
 }
 
 async function toggleUserActive(id, username, currentlyActive) {
-  if (username === _currentUsername) { toast('You cannot deactivate your own account', 'error'); return; }
+  if (username === _currentUsername) { toast('You cannot change your own account status', 'error'); return; }
   if (!confirm(`${currentlyActive ? 'Deactivate' : 'Reactivate'} user "${username}"?`)) return;
   try {
     await api('PUT', `/api/users/${id}`, { is_active: !currentlyActive });
+    const newActive = !currentlyActive;
+    const user = _usersCache.find(u => u.id === id);
+    if (user) user.is_active = newActive ? 1 : 0;
+    renderUsers();
     toast(`User ${username} ${currentlyActive ? 'deactivated' : 'reactivated'}`);
-    _usersLoaded = false;
-    loadUsers();
+    loadUsers(true);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function resendInvite(id, username) {
+  if (!confirm(`Resend invite to "${username}"?`)) return;
+  try {
+    await api('POST', `/api/users/${id}/resend-invite`);
+    toast(`Invite resent to ${username}`);
   } catch (e) {
     toast(e.message, 'error');
   }
