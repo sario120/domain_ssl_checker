@@ -1,36 +1,16 @@
-import os
-import tempfile
-import shutil
-import atexit
+from pg_test_utils import reset_test_schema
+
 from models import is_valid_domain, add_domain, get_domain, delete_domain
-from models import init_db, init_settings, get_settings, update_settings, get_security_settings, close_db
+from models import init_db, init_settings, get_settings, update_settings, get_security_settings
 from models import add_user, get_users, get_user, update_user, delete_user, count_admins
 
-
-_test_dirs = []
-
-
-def _cleanup_all():
-    for d in _test_dirs:
-        shutil.rmtree(d, ignore_errors=True)
-
-
-atexit.register(_cleanup_all)
-
-
-import models as models_mod
+TEST_SCHEMA = "vigil_test_models"
 
 
 def _init_test_db():
-    close_db()
-    tmpdir = tempfile.mkdtemp(prefix="vigil_test_")
-    _test_dirs.append(tmpdir)
-    db_path = os.path.join(tmpdir, "test.db")
-    models_mod.DB_PATH = db_path
-    os.environ["DB_PATH"] = db_path
+    reset_test_schema(TEST_SCHEMA)
     init_db()
     init_settings()
-    return db_path
 
 
 class TestIsValidDomain:

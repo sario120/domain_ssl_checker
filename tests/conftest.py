@@ -2,6 +2,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ssl_domain_checker"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
 os.environ["SECRET_KEY"] = "test-secret-key-for-testing-purposes-only"
 os.environ["ENCRYPTION_KEY"] = "test-encryption-key-for-testing-purposes-only"

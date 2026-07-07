@@ -1,17 +1,12 @@
-import gc
 import logging
 import os
-import re
 import threading
-import time
-
-import sqlite3
 
 from flask import g
 
 logger = logging.getLogger(__name__)
 
-DB_TYPE = os.environ.get('DB_TYPE', 'sqlite')
+DB_TYPE = 'postgresql'
 
 # Thread-local connection for non-request contexts (background workers, migrations)
 _tls = threading.local()
@@ -38,15 +33,6 @@ def _get_pg_pool():
                 logger.info("PostgreSQL connection pool created (min=%s, max=%s)",
                             _PG_POOL_MIN, _PG_POOL_MAX)
     return _pg_pool
-
-
-def _close_pg_pool():
-    global _pg_pool
-    with _pg_pool_lock:
-        if _pg_pool is not None:
-            _pg_pool.closeall()
-            _pg_pool = None
-            logger.debug("PostgreSQL connection pool closed")
 
 
 # ─── PostgreSQL connection wrapper ────────────────────────────
@@ -116,33 +102,14 @@ def _build_pg_conn_string():
 
 
 def connect():
-    if DB_TYPE == 'postgresql':
-        schema = os.environ.get('POSTGRES_SCHEMA', 'vigil').strip()
-        if not schema:
-            schema = 'vigil'
-        try:
-            return _PostgreSQLConnection(schema)
-        except Exception as e:
-            logger.error("PostgreSQL connection failed: %s", e)
-            raise
-    else:
-        from models import DB_PATH
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                conn = sqlite3.connect(DB_PATH, isolation_level='')
-                conn.row_factory = sqlite3.Row
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA foreign_keys=ON")
-                conn.execute("PRAGMA busy_timeout=5000")
-                return conn
-            except sqlite3.OperationalError:
-                if attempt < max_retries - 1:
-                    logger.warning("SQLite connect attempt %d failed, retrying...", attempt + 1)
-                    time.sleep(0.5 * (attempt + 1))
-                    continue
-                raise
+    schema = os.environ.get('POSTGRES_SCHEMA', 'vigil').strip()
+    if not schema:
+        schema = 'vigil'
+    try:
+        return _PostgreSQLConnection(schema)
+    except Exception as e:
+        logger.error("PostgreSQL connection failed: %s", e)
+        raise
 
 
 def get_db():
@@ -172,96 +139,63 @@ def close_db(e=None):
 
 
 def flush_connections():
-    """Close every open sqlite3.Connection in this process.
-    Safe to call before DB overwrite — all connections become stale."""
+    """Close the current connection so the next get_db() call reconnects
+    (e.g. picks up a different POSTGRES_SCHEMA, or re-reads post-restore data)."""
     close_db()
-    for obj in gc.get_objects():
-        if isinstance(obj, sqlite3.Connection):
-            try:
-                obj.close()
-            except Exception:
-                pass
 
 
 # ─── Introspection helpers ────────────────────────────────────
 
 def table_columns(table):
     conn = get_db()
-    if DB_TYPE == 'postgresql':
-        cur = conn.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = current_schema AND table_name = %s",
-            (table,)
-        )
-        return {r['column_name'] for r in cur.fetchall()}
-    else:
-        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-        return {r[1] for r in rows}
+    cur = conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = current_schema AND table_name = %s",
+        (table,)
+    )
+    return {r['column_name'] for r in cur.fetchall()}
 
 
 def column_type(table, column):
     conn = get_db()
-    if DB_TYPE == 'postgresql':
-        cur = conn.execute(
-            "SELECT data_type FROM information_schema.columns "
-            "WHERE table_schema = current_schema AND table_name = %s AND column_name = %s",
-            (table, column)
-        )
-        row = cur.fetchone()
-        return row['data_type'] if row else None
-    else:
-        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-        for r in rows:
-            if r[1] == column:
-                return r[2]
-        return None
+    cur = conn.execute(
+        "SELECT data_type FROM information_schema.columns "
+        "WHERE table_schema = current_schema AND table_name = %s AND column_name = %s",
+        (table, column)
+    )
+    row = cur.fetchone()
+    return row['data_type'] if row else None
 
 
 def has_table(table):
     conn = get_db()
-    if DB_TYPE == 'postgresql':
-        cur = conn.execute(
-            "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
-            "WHERE table_schema = current_schema AND table_name = %s) AS exists",
-            (table,)
-        )
-        return cur.fetchone()['exists']
-    else:
-        rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            (table,)
-        ).fetchall()
-        return len(rows) > 0
+    cur = conn.execute(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema = current_schema AND table_name = %s) AS exists",
+        (table,)
+    )
+    return cur.fetchone()['exists']
 
 
 # ─── Dialect helpers ──────────────────────────────────────────
 
 def placeholder():
-    return '%s' if DB_TYPE == 'postgresql' else '?'
+    return '%s'
 
 
 def lastrowid(conn, table=None):
-    if DB_TYPE == 'postgresql':
-        cur = conn.execute("SELECT lastval() AS lastval")
-        return cur.fetchone()['lastval']
-    else:
-        return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    cur = conn.execute("SELECT lastval() AS lastval")
+    return cur.fetchone()['lastval']
 
 
 def is_integrity_error(e):
-    if DB_TYPE == 'postgresql':
-        from psycopg2.errors import UniqueViolation
-        return isinstance(e, UniqueViolation)
-    else:
-        return isinstance(e, sqlite3.IntegrityError)
+    from psycopg2.errors import UniqueViolation
+    return isinstance(e, UniqueViolation)
 
 
 def get_backend_info():
-    info = {'type': DB_TYPE}
-    if DB_TYPE == 'postgresql':
-        info['schema'] = os.environ.get('POSTGRES_SCHEMA', 'vigil').strip()
-        info['host'] = os.environ.get('POSTGRES_HOST', 'localhost')
-    else:
-        from models import DB_PATH
-        info['file'] = DB_PATH
-    return info
+    return {
+        'type': DB_TYPE,
+        'schema': os.environ.get('POSTGRES_SCHEMA', 'vigil').strip(),
+        'host': os.environ.get('POSTGRES_HOST', 'localhost'),
+    }

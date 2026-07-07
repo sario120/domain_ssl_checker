@@ -32,7 +32,7 @@ Monitor SSL certificate expiry, domain registration expiry, and web app uptime f
 ## Architecture
 
 ```
-Browser  ←→  Flask API  ←→  SQLite / PostgreSQL
+Browser  ←→  Flask API  ←→  PostgreSQL
                    ↑
        APScheduler (configurable intervals)
                    ↓
@@ -49,7 +49,7 @@ SSL Check  WHOIS  Webapp Check
 |-------|--------|
 | Runtime | Python 3.12+ |
 | Framework | Flask 3.x |
-| Database | SQLite (WAL mode) or PostgreSQL |
+| Database | PostgreSQL |
 | Scheduler | APScheduler 3.x |
 | WSGI | Gunicorn (gthread worker) |
 | Encryption | cryptography (Fernet) |
@@ -71,7 +71,7 @@ ssl_checker/
 │   ├── email_templates.py    # Email template rendering
 │   ├── crypto.py             # Fernet encrypt/decrypt
 │   ├── backup.py             # Backup + rotation
-│   ├── db.py                 # SQLite / PostgreSQL abstraction
+│   ├── db.py                 # PostgreSQL connection pool + query helpers
 │   ├── status_utils.py       # Day-based status classification
 │   ├── __init__.py           # Package init
 │   ├── static/               # JS, CSS, SVG, PNG
@@ -84,16 +84,18 @@ ssl_checker/
 │   └── templates/            # HTML templates
 │       ├── index.html        # Main SPA shell
 │       └── login.html        # Login page
-├── tests/                    # pytest test suite (62 passing, 7 files)
+├── tests/                    # pytest test suite (runs against real PostgreSQL)
 │   ├── __init__.py
 │   ├── conftest.py           # Fixtures, env setup
+│   ├── pg_test_utils.py      # Per-test-file schema isolation helper
+│   ├── test_app.py
 │   ├── test_checker.py
 │   ├── test_crypto.py
 │   ├── test_models.py
 │   ├── test_status_utils.py
 │   ├── test_webapps.py
 │   └── test_webhook.py
-├── data_volume/              # SQLite DB (gitignored)
+├── data_volume/              # admin_credentials.txt on first run (gitignored)
 ├── backups/                  # Gzipped backups (gitignored)
 ├── Dockerfile                # Multi-stage build
 ├── docker-compose.yml        # Service definition with healthcheck
@@ -370,8 +372,9 @@ See `.env.sample` for all variables with documentation. Key variables:
 | `SECRET_KEY` | — | Flask session signing key (required) |
 | `ENCRYPTION_KEY` | — | Fernet key for SMTP password encryption (required) |
 | `ADMIN_PASSWORD` | — | First-run admin password (auto-generated if empty) |
-| `DB_TYPE` | `sqlite` | Database backend: `sqlite` or `postgresql` |
-| `DB_PATH` | `data_volume/ssl_checker.db` | SQLite file path |
+| `POSTGRES_HOST` | `localhost` | PostgreSQL host |
+| `POSTGRES_DB` | `vigil` | PostgreSQL database name |
+| `POSTGRES_SCHEMA` | `vigil` | PostgreSQL schema (created if missing) |
 | `HTTPS` | `1` | Enable Secure cookies + HSTS |
 | `TIMEZONE` | `Asia/Karachi` | IANA timezone for timestamps |
 | `SESSION_LIFETIME_HOURS` | `4` | Max session lifetime (max 4) |
@@ -458,29 +461,22 @@ Alerts are rate-limited to once per 24 hours per domain/webapp. Summary email is
 
 ## Database
 
-### SQLite (default)
-
-- WAL mode for concurrent reads
-- Foreign keys enabled
-- Busy timeout: 5s
-- File location: `data_volume/ssl_checker.db`
-
 ### PostgreSQL
 
 - Connection pooling (min 2, max 10)
-- Schema-based isolation
+- Schema-based isolation (`POSTGRES_SCHEMA`, created automatically if missing)
 - `RETURNING` clause for INSERT/UPDATE
 - Timezone-aware timestamps converted to naive UTC internally
 
 ### Schema Versioning
 
-`schema_version` table tracks the schema version. Migrations use `ALTER TABLE ADD COLUMN` guarded by `PRAGMA table_info()` / `db.table_columns()`.
+`schema_version` table tracks the schema version. Migrations use `ALTER TABLE ADD COLUMN` guarded by `db.table_columns()` (queries `information_schema.columns`).
 
 ## Backups
 
 - Automatic daily at 03:00 (APScheduler)
-- Gzip-compressed SQLite copy with metadata JSON sidecar
-- Verification checks SQLite header validity
+- Primary format: `pg_dump` (falls back to a JSON export of allow-listed tables if `pg_dump` is unavailable)
+- Verification checks the dump header / JSON structure
 - Pre-restore snapshot created automatically
 - Retention: 30 backups (configurable via `MAX_BACKUPS`)
 - Manual backup/restore available via UI

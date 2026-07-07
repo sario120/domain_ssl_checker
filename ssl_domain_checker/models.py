@@ -188,160 +188,6 @@ def check_rate_limit(key, max_requests, window_seconds):
     return True
 
 
-_SQLITE_SCHEMA = """
-CREATE TABLE IF NOT EXISTS domains (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    url TEXT NOT NULL UNIQUE,
-    type TEXT NOT NULL DEFAULT 'full',
-    ssl_expiry TEXT, ssl_days_left INTEGER, ssl_status TEXT DEFAULT 'pending',
-    ssl_issuer TEXT, ssl_subject TEXT, ssl_sans TEXT,
-    ssl_valid_from TEXT, ssl_valid_until TEXT,
-    domain_expiry TEXT, domain_days_left INTEGER,
-    domain_status TEXT DEFAULT 'pending', domain_registrar TEXT,
-    status TEXT DEFAULT 'pending', last_checked TEXT,
-    notes TEXT, ssl_alert_threshold INTEGER, domain_alert_threshold INTEGER,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP, last_alerted TEXT,
-    ssl_tls_version TEXT, ssl_cipher TEXT, ssl_fingerprint TEXT, ssl_serial TEXT,
-    tags TEXT DEFAULT '', check_interval INTEGER DEFAULT 360,
-    manual_registrar TEXT, manual_expiry_date TEXT
-);
-CREATE TABLE IF NOT EXISTS settings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    smtp_server TEXT DEFAULT 'smtp.gmail.com', smtp_port INTEGER DEFAULT 587,
-    smtp_email TEXT DEFAULT '', smtp_password TEXT DEFAULT '',
-    smtp_enabled INTEGER DEFAULT 0,
-    ssl_alert_threshold INTEGER DEFAULT 30, domain_alert_threshold INTEGER DEFAULT 30,
-    alert_emails TEXT DEFAULT '',
-    slack_webhook_url TEXT DEFAULT '', slack_enabled INTEGER DEFAULT 0,
-    zulip_webhook_url TEXT DEFAULT '', zulip_enabled INTEGER DEFAULT 0,
-    last_summary_sent TEXT
-);
-CREATE TABLE IF NOT EXISTS logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    type TEXT NOT NULL DEFAULT 'info', message TEXT NOT NULL,
-    domain_id INTEGER, username TEXT, client_ip TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE, email TEXT, password TEXT NOT NULL,
-    role TEXT DEFAULT 'admin',
-    login_fails INTEGER DEFAULT 0, last_fail TEXT, last_login TEXT,
-    is_active INTEGER DEFAULT 1,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS invite_tokens (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash TEXT NOT NULL UNIQUE,
-    expires_at TEXT NOT NULL,
-    used_at TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_invite_tokens_hash ON invite_tokens(token_hash);
-CREATE INDEX IF NOT EXISTS idx_invite_tokens_user ON invite_tokens(user_id);
-CREATE TABLE IF NOT EXISTS security_settings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_timeout INTEGER DEFAULT 60, max_login_attempts INTEGER DEFAULT 5,
-    lockout_duration INTEGER DEFAULT 15, min_password_length INTEGER DEFAULT 8,
-    require_uppercase INTEGER DEFAULT 1, require_lowercase INTEGER DEFAULT 1,
-    require_number INTEGER DEFAULT 1, require_special INTEGER DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS api_keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
-    key_hash TEXT NOT NULL UNIQUE, key_masked TEXT NOT NULL,
-    revoked INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP, last_used TEXT
-);
-CREATE TABLE IF NOT EXISTS schema_version (
-    version INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_domains_url ON domains(url);
-CREATE INDEX IF NOT EXISTS idx_domains_type ON domains(type);
-CREATE INDEX IF NOT EXISTS idx_domains_ssl_status ON domains(ssl_status);
-CREATE INDEX IF NOT EXISTS idx_domains_domain_status ON domains(domain_status);
-CREATE INDEX IF NOT EXISTS idx_domains_status ON domains(status);
-CREATE INDEX IF NOT EXISTS idx_logs_created ON logs(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_logs_type ON logs(type);
-CREATE INDEX IF NOT EXISTS idx_logs_domain_id ON logs(domain_id);
-CREATE INDEX IF NOT EXISTS idx_domains_last_checked ON domains(last_checked);
-CREATE INDEX IF NOT EXISTS idx_domains_created_at ON domains(created_at);
-CREATE INDEX IF NOT EXISTS idx_domains_ssl_days_left ON domains(ssl_days_left);
-CREATE INDEX IF NOT EXISTS idx_domains_domain_days_left ON domains(domain_days_left);
-CREATE INDEX IF NOT EXISTS idx_domains_last_alerted ON domains(last_alerted);
-CREATE TABLE IF NOT EXISTS health_snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    snapshot_date TEXT NOT NULL UNIQUE,
-    ssl_healthy INTEGER DEFAULT 0, ssl_total INTEGER DEFAULT 0,
-    domain_healthy INTEGER DEFAULT 0, domain_total INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_health_date ON health_snapshots(snapshot_date);
-CREATE TABLE IF NOT EXISTS check_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_type TEXT NOT NULL DEFAULT 'manual', status TEXT NOT NULL DEFAULT 'running',
-    domains_checked INTEGER DEFAULT 0, domains_total INTEGER DEFAULT 0,
-    started_at TEXT DEFAULT CURRENT_TIMESTAMP, completed_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_check_runs_started ON check_runs(started_at);
-CREATE INDEX IF NOT EXISTS idx_check_runs_status ON check_runs(status);
-CREATE TABLE IF NOT EXISTS rate_limits (
-    key TEXT PRIMARY KEY, count INTEGER DEFAULT 0, window_start REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_rate_limits_window ON rate_limits(window_start);
-CREATE TABLE IF NOT EXISTS check_results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
-    checked_at TEXT NOT NULL,
-    status TEXT,
-    result_json TEXT,
-    ssl_days_left INTEGER,
-    domain_days_left INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_check_results_domain ON check_results(domain_id, checked_at DESC);
-CREATE TABLE IF NOT EXISTS webapps (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    url TEXT NOT NULL,
-    method TEXT DEFAULT 'GET',
-    expected_status INTEGER DEFAULT 200,
-    expected_body TEXT,
-    timeout INTEGER DEFAULT 10,
-    headers TEXT,
-    body TEXT,
-    check_interval INTEGER DEFAULT 300,
-    status TEXT DEFAULT 'unknown',
-    response_time_ms REAL,
-    last_status_code INTEGER,
-    last_checked TEXT,
-    last_error TEXT,
-    uptime_count INTEGER DEFAULT 0,
-    downtime_count INTEGER DEFAULT 0,
-    total_checks INTEGER DEFAULT 0,
-    successful_checks INTEGER DEFAULT 0,
-    is_active INTEGER DEFAULT 1,
-    notify_on_down INTEGER DEFAULT 1,
-    notify_on_recovery INTEGER DEFAULT 1,
-    last_alerted TEXT,
-    notes TEXT,
-    status_changed_at TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_webapps_status ON webapps(status);
-CREATE INDEX IF NOT EXISTS idx_webapps_active ON webapps(is_active);
-CREATE TABLE IF NOT EXISTS webapp_results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    webapp_id INTEGER NOT NULL REFERENCES webapps(id) ON DELETE CASCADE,
-    status TEXT NOT NULL,
-    status_code INTEGER,
-    response_time_ms REAL,
-    error TEXT,
-    checked_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_webapp_results_app ON webapp_results(webapp_id, checked_at DESC);
-"""
-
 _PG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS domains (
     id BIGSERIAL PRIMARY KEY,
@@ -511,74 +357,6 @@ _MIGRATION_SETTINGS_COLS = frozenset({
 })
 
 
-def _run_sqlite_migrations():
-    conn = get_db()
-    conn.executescript(_SQLITE_SCHEMA)
-    conn.commit()
-
-    for col, stmt in [
-        ('login_fails', 'ALTER TABLE users ADD COLUMN login_fails INTEGER DEFAULT 0'),
-        ('last_fail', 'ALTER TABLE users ADD COLUMN last_fail TEXT'),
-        ('last_login', 'ALTER TABLE users ADD COLUMN last_login TEXT'),
-        ('is_active', 'ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1'),
-        ('manual_registrar', 'ALTER TABLE domains ADD COLUMN manual_registrar TEXT'),
-        ('manual_expiry_date', 'ALTER TABLE domains ADD COLUMN manual_expiry_date TEXT'),
-        ('tags', 'ALTER TABLE domains ADD COLUMN tags TEXT DEFAULT ""'),
-        ('ssl_fingerprint', 'ALTER TABLE domains ADD COLUMN ssl_fingerprint TEXT'),
-        ('ssl_tls_version', 'ALTER TABLE domains ADD COLUMN ssl_tls_version TEXT'),
-        ('ssl_cipher', 'ALTER TABLE domains ADD COLUMN ssl_cipher TEXT'),
-        ('ssl_serial', 'ALTER TABLE domains ADD COLUMN ssl_serial TEXT'),
-        ('check_interval', 'ALTER TABLE domains ADD COLUMN check_interval INTEGER DEFAULT 360'),
-        ('slack_webhook_url', 'ALTER TABLE settings ADD COLUMN slack_webhook_url TEXT DEFAULT ""'),
-        ('slack_enabled', 'ALTER TABLE settings ADD COLUMN slack_enabled INTEGER DEFAULT 0'),
-        ('zulip_webhook_url', 'ALTER TABLE settings ADD COLUMN zulip_webhook_url TEXT DEFAULT ""'),
-        ('zulip_enabled', 'ALTER TABLE settings ADD COLUMN zulip_enabled INTEGER DEFAULT 0'),
-    ]:
-        try:
-            conn.execute(stmt)
-            conn.commit()
-        except Exception:
-            logger.debug("Column %s already exists, skipping", col)
-
-    dcols = {r[1] for r in conn.execute("PRAGMA table_info(domains)").fetchall()}
-    for col, dtype in [("ssl_alert_threshold", "INTEGER"), ("domain_alert_threshold", "INTEGER"),
-                        ("notes", "TEXT"), ("manual_expiry_date", "TEXT"),
-                        ("check_interval", "INTEGER"), ("manual_registrar", "TEXT"),
-                        ("last_alerted", "TEXT")]:
-        if col not in dcols:
-            if col not in _MIGRATION_DOMAIN_COLS:
-                raise ValueError(f"Invalid migration column: {col}")
-            conn.execute(f"ALTER TABLE domains ADD COLUMN {col} {dtype}")
-    ucols = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
-    if "role" not in ucols:
-        conn.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
-    if "is_active" not in ucols:
-        conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1")
-    if "email" not in ucols:
-        conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
-    lcols = {r[1] for r in conn.execute("PRAGMA table_info(logs)").fetchall()}
-    if "username" not in lcols:
-        conn.execute("ALTER TABLE logs ADD COLUMN username TEXT")
-    if "client_ip" not in lcols:
-        conn.execute("ALTER TABLE logs ADD COLUMN client_ip TEXT")
-    scols = {r[1] for r in conn.execute("PRAGMA table_info(settings)").fetchall()}
-    for col in ("last_summary_sent", "backup_schedule_hour", "backup_schedule_minute", "max_backups", "log_retention_days"):
-        if col not in scols:
-            if col not in _MIGRATION_SETTINGS_COLS:
-                raise ValueError(f"Invalid migration column: {col}")
-            dtype = "INTEGER" if col in ("backup_schedule_hour", "backup_schedule_minute", "max_backups", "log_retention_days") else "TEXT"
-            conn.execute(f"ALTER TABLE settings ADD COLUMN {col} {dtype}")
-    wcols = {r[1] for r in conn.execute("PRAGMA table_info(webapps)").fetchall()}
-    if "last_alerted" not in wcols:
-        conn.execute("ALTER TABLE webapps ADD COLUMN last_alerted TEXT")
-    if "status_changed_at" not in wcols:
-        conn.execute("ALTER TABLE webapps ADD COLUMN status_changed_at TEXT")
-        conn.execute("UPDATE webapps SET status_changed_at=COALESCE(last_checked, created_at) WHERE status_changed_at IS NULL")
-    if "tags" not in wcols:
-        conn.execute("ALTER TABLE webapps ADD COLUMN tags TEXT DEFAULT ''")
-    conn.commit()
-
-
 def _run_postgres_migrations():
     conn = get_db()
     conn.executescript(_PG_SCHEMA)
@@ -649,10 +427,7 @@ def _run_postgres_migrations():
 def init_db():
     logger.info("Database backend: %s", db.DB_TYPE)
 
-    if db.DB_TYPE == 'postgresql':
-        _run_postgres_migrations()
-    else:
-        _run_sqlite_migrations()
+    _run_postgres_migrations()
 
     conn = get_db()
 
@@ -758,6 +533,7 @@ _ALLOWED_SETTINGS_COLS = frozenset({
     'log_retention_days',
 })
 _ALLOWED_USER_COLS = frozenset({'password', 'role', 'email'})
+_BOOLEAN_SETTINGS_COLS = frozenset({'smtp_enabled', 'slack_enabled', 'zulip_enabled'})
 
 
 def update_domain(domain_id, url=None, domain_type=None, notes=None, manual_expiry_date=None, manual_registrar=None):
@@ -874,8 +650,6 @@ def save_check_result_history(domain_id, result):
                  'domain_expiry', 'domain_days_left', 'domain_status',
                  'domain_registrar', 'domain_error')
     }, default=str)
-    if db.DB_TYPE == 'postgresql':
-        result_json = result_json
     conn.execute(
         "INSERT INTO check_results (domain_id, checked_at, status, result_json, "
         "ssl_days_left, domain_days_left) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1019,6 +793,8 @@ def update_settings(data):
             v = data[k]
             if k == 'smtp_password' and v:
                 v = encrypt(v)
+            elif k in _BOOLEAN_SETTINGS_COLS:
+                v = bool(v)
             set_cols.append(k)
             vals.append(v)
     if set_cols:
@@ -1140,10 +916,7 @@ def get_logs_activity(date_str=None):
         today = timezone_now().strftime('%Y-%m-%d')
         start = today + ' 00:00:00'
         end = today + ' 23:59:59'
-    if db.DB_TYPE == 'postgresql':
-        hour_expr = "EXTRACT(HOUR FROM created_at)::int"
-    else:
-        hour_expr = "CAST(strftime('%H', created_at) AS INTEGER)"
+    hour_expr = "EXTRACT(HOUR FROM created_at)::int"
     rows = conn.execute(f"""
         SELECT {hour_expr} AS hour, COUNT(*) AS cnt
         FROM logs
@@ -1408,20 +1181,15 @@ def save_health_snapshot():
     domain_healthy = sum(1 for d in full if (d['domain_status'] or 'pending') == 'healthy')
     domain_total = len(full)
 
-    if db.DB_TYPE == 'postgresql':
-        conn.execute("""INSERT INTO health_snapshots
-            (snapshot_date, ssl_healthy, ssl_total, domain_healthy, domain_total)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT (snapshot_date)
-            DO UPDATE SET ssl_healthy=EXCLUDED.ssl_healthy,
-                ssl_total=EXCLUDED.ssl_total,
-                domain_healthy=EXCLUDED.domain_healthy,
-                domain_total=EXCLUDED.domain_total""",
-            (today, ssl_healthy, ssl_total, domain_healthy, domain_total))
-    else:
-        conn.execute("""INSERT OR REPLACE INTO health_snapshots
-            (snapshot_date, ssl_healthy, ssl_total, domain_healthy, domain_total)
-            VALUES (?, ?, ?, ?, ?)""", (today, ssl_healthy, ssl_total, domain_healthy, domain_total))
+    conn.execute("""INSERT INTO health_snapshots
+        (snapshot_date, ssl_healthy, ssl_total, domain_healthy, domain_total)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (snapshot_date)
+        DO UPDATE SET ssl_healthy=EXCLUDED.ssl_healthy,
+            ssl_total=EXCLUDED.ssl_total,
+            domain_healthy=EXCLUDED.domain_healthy,
+            domain_total=EXCLUDED.domain_total""",
+        (today, ssl_healthy, ssl_total, domain_healthy, domain_total))
     conn.commit()
 
 
@@ -1536,10 +1304,7 @@ def get_dashboard_summary():
     snapshots = get_health_snapshots(7)
 
     cutoff_24h = (timezone_now() - datetime.timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
-    if db.DB_TYPE == 'postgresql':
-        hour_expr = "to_char(date_trunc('hour', checked_at), 'YYYY-MM-DD HH24:00:00')"
-    else:
-        hour_expr = "strftime('%Y-%m-%d %H:00:00', checked_at)"
+    hour_expr = "to_char(date_trunc('hour', checked_at), 'YYYY-MM-DD HH24:00:00')"
     wa_trend_raw = conn.execute(f"""
         SELECT {hour_expr} AS hour,
                COUNT(*) AS total,
@@ -1633,16 +1398,19 @@ def get_domain_pem(domain_id):
     """Return the most recent PEM for a domain from check_results (avoids bloating the domains table)."""
     conn = get_db()
     row = conn.execute(
-        "SELECT result_json FROM check_results WHERE domain_id=? AND result_json LIKE '%ssl_pem%' "
+        "SELECT result_json FROM check_results WHERE domain_id=? AND result_json::text LIKE ? "
         "ORDER BY checked_at DESC LIMIT 1",
-        (domain_id,)
+        (domain_id, '%ssl_pem%')
     ).fetchone()
     if row and row['result_json']:
-        try:
-            data = json.loads(row['result_json'])
+        data = row['result_json']
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                return None
+        if isinstance(data, dict):
             return data.get('ssl_pem')
-        except (json.JSONDecodeError, TypeError):
-            pass
     return None
 
 
@@ -1935,7 +1703,7 @@ def get_webapp_stats():
 
 def get_webapp_recent_failures(limit=5):
     conn = get_db()
-    order = "ORDER BY w.last_checked DESC NULLS LAST" if db.DB_TYPE == 'postgresql' else "ORDER BY w.last_checked DESC"
+    order = "ORDER BY w.last_checked DESC NULLS LAST"
     active_check = "CAST(w.is_active AS INTEGER) = 1"
     rows = conn.execute(f"""
         SELECT w.id, w.name, w.url, w.status, w.last_checked,

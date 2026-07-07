@@ -18,7 +18,7 @@ Vigil is a self-hosted web application that monitors SSL certificate expiry, dom
 - **Check Summary Emails** — Daily summary of all-domain health sent after scheduled check.
 - **User Management** — Role-based access (admin/user/viewer), account lockout, password policy, user deactivation/reactivation (admin cannot self-deactivate).
 - **API Key Authentication** — Bearer token API keys for headless/automated access.
-- **Database Backups** — Automatic daily gzipped SQLite backups with metadata, manual backup/restore via UI.
+- **Database Backups** — Automatic daily PostgreSQL backups (pg_dump, JSON fallback) with metadata, manual backup/restore via UI.
 - **Health Snapshots** — Daily domain/SSL health data stored for dashboard display.
 - **Import/Export** — Bulk domain import/export (JSON/CSV/TXT), webapp import/export (JSON/CSV/TXT), settings export/import.
 - **Dark/Light Theme** — Persistent theme preference.
@@ -179,8 +179,9 @@ Vigil is a self-hosted web application that monitors SSL certificate expiry, dom
 | `ENCRYPTION_KEY` | (required) | Fernet key for SMTP password encryption |
 | `FLASK_DEBUG` | `0` | Enable Flask debug mode |
 | `PORT` | `5000` | App listen port |
-| `DB_TYPE` | `sqlite` | Database backend: sqlite or postgresql |
-| `DB_PATH` | `data_volume/ssl_checker.db` | SQLite database path |
+| `POSTGRES_HOST` | `localhost` | PostgreSQL host |
+| `POSTGRES_DB` | `vigil` | PostgreSQL database name |
+| `POSTGRES_SCHEMA` | `vigil` | PostgreSQL schema (created if missing) |
 | `BACKUP_DIR` | `backups/` | Backup storage directory |
 | `MAX_BACKUPS` | `30` | Max backup files to retain |
 | `HTTPS` | `1` | Enable Secure cookie flag and HSTS |

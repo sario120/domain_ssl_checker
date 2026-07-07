@@ -1,35 +1,10 @@
 import os
-import tempfile
-import shutil
-import json
-import atexit
 
-# Force SQLite mode — this env must be set before any imports
-os.environ["DB_TYPE"] = "sqlite"
+from pg_test_utils import reset_test_schema
 
-_test_dirs = []
+TEST_SCHEMA = "vigil_test_app"
+os.environ["POSTGRES_SCHEMA"] = TEST_SCHEMA
 
-
-def _cleanup_all():
-    for d in _test_dirs:
-        shutil.rmtree(d, ignore_errors=True)
-
-
-atexit.register(_cleanup_all)
-
-
-def _init_test_db():
-    tmpdir = tempfile.mkdtemp(prefix="vigil_test_app_")
-    _test_dirs.append(tmpdir)
-    db_path = os.path.join(tmpdir, "test.db")
-    os.environ["DB_PATH"] = db_path
-    return db_path
-
-
-# Import app after DB_PATH and DB_TYPE are set
-_init_test_db()
-from db import DB_TYPE as _db_type
-assert _db_type == 'sqlite', f"Expected sqlite, got {_db_type}"
 from app import app
 import models
 
@@ -41,10 +16,7 @@ class TestAppRoutes:
         self._init_db()
 
     def _init_db(self):
-        import db as db_mod
-        db_mod.flush_connections()
-        db_path = _init_test_db()
-        models.DB_PATH = db_path
+        reset_test_schema(TEST_SCHEMA)
         models.init_db()
         models.init_settings()
 

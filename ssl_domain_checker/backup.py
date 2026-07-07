@@ -1,14 +1,10 @@
 import gzip
-import io
 import json
 import logging
 import os
-import shutil
 import glob
-import sqlite3
 import stat
 import subprocess
-import tempfile
 from datetime import datetime, timezone
 
 import db
@@ -50,10 +46,6 @@ BACKUP_DIR = os.environ.get(
     "BACKUP_DIR",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backups")
 )
-_DB_PATH_ENV = os.environ.get("DB_PATH", "")
-DB_PATH = os.path.abspath(_DB_PATH_ENV) if _DB_PATH_ENV else os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data_volume", "ssl_checker.db"
-)
 MAX_BACKUPS = int(os.environ.get("MAX_BACKUPS", "30"))
 
 
@@ -78,18 +70,11 @@ def _count_domains_from_conn(conn):
 
 
 def _list_tables(conn):
-    if db.DB_TYPE == 'postgresql':
-        rows = conn.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = current_schema AND table_type = 'BASE TABLE'"
-        ).fetchall()
-        return [r['table_name'] for r in rows if r['table_name'] not in ('rate_limits',)]
-    else:
-        rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND name NOT LIKE 'sqlite_%'"
-        ).fetchall()
-        return [r[0] for r in rows]
+    rows = conn.execute(
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema = current_schema AND table_type = 'BASE TABLE'"
+    ).fetchall()
+    return [r['table_name'] for r in rows if r['table_name'] not in ('rate_limits',)]
 
 
 def _export_pg_dump(backup_path, notes=None):
@@ -230,13 +215,9 @@ def get_db_info():
                 info['schedule_minute'] = int(row['backup_schedule_minute'])
             if row.get('max_backups') is not None:
                 info['max_backups'] = int(row['max_backups'])
-        if db.DB_TYPE == 'postgresql':
-            info['host'] = os.environ.get('POSTGRES_HOST', 'localhost')
-            info['db'] = os.environ.get('POSTGRES_DB', 'vigil')
-            info['schema'] = os.environ.get('POSTGRES_SCHEMA', 'vigil').strip()
-        else:
-            if os.path.exists(DB_PATH):
-                info['size'] = os.path.getsize(DB_PATH)
+        info['host'] = os.environ.get('POSTGRES_HOST', 'localhost')
+        info['db'] = os.environ.get('POSTGRES_DB', 'vigil')
+        info['schema'] = os.environ.get('POSTGRES_SCHEMA', 'vigil').strip()
         row2 = conn.execute("SELECT COUNT(*) AS cnt FROM domains").fetchone()
         info['domain_count'] = row2['cnt'] if row2 else None
         row3 = conn.execute("SELECT COUNT(*) AS cnt FROM webapps").fetchone()
@@ -253,114 +234,38 @@ def get_db_info():
 def create_backup(notes=None):
     ensure_backup_dir()
 
-    if db.DB_TYPE == 'postgresql':
-        try:
-            return _export_pg_dump(BACKUP_DIR, notes=notes)
-        except (RuntimeError, FileNotFoundError) as e:
-            logger.warning("pg_dump export failed (%s), falling back to JSON export", e)
-            try:
-                return _export_pg_json(BACKUP_DIR, notes=notes)
-            except RuntimeError as e2:
-                logger.error("JSON fallback backup also failed: %s", e2)
-                raise
-
-    if not os.path.exists(DB_PATH):
-        logger.warning("Database file not found, skipping backup")
-        return None
-
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    backup_name = f"ssl_checker_{ts}.db.gz"
-    backup_path = os.path.join(BACKUP_DIR, backup_name)
-
-    # Use backup API to capture a consistent snapshot (handles WAL correctly)
-    tmp_fd, tmp_path = tempfile.mkstemp(suffix='.db')
-    os.close(tmp_fd)
-    src = sqlite3.connect(DB_PATH)
-    dst = sqlite3.connect(tmp_path)
     try:
-        src.backup(dst)
-    finally:
-        src.close()
-        dst.close()
-
-    with open(tmp_path, 'rb') as f_in:
-        with gzip.open(backup_path, 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out)
-    os.unlink(tmp_path)
-
-    count = verify_backup(backup_path)
-
-    meta_path = backup_path + ".meta"
-    meta = {
-        "filename": backup_name,
-        "created": datetime.now(timezone.utc).isoformat(),
-        "size": os.path.getsize(backup_path),
-        "domain_count": count,
-        "db_size": os.path.getsize(DB_PATH),
-        "format": "sqlite",
-    }
-    if notes:
-        meta["notes"] = notes
-    with open(meta_path, 'w') as f:
-        json.dump(meta, f)
-
-    logger.info(f"Backup created: {backup_name} ({count} domains)")
-    cleanup_old_backups()
-    return backup_path
+        return _export_pg_dump(BACKUP_DIR, notes=notes)
+    except (RuntimeError, FileNotFoundError) as e:
+        logger.warning("pg_dump export failed (%s), falling back to JSON export", e)
+        try:
+            return _export_pg_json(BACKUP_DIR, notes=notes)
+        except RuntimeError as e2:
+            logger.error("JSON fallback backup also failed: %s", e2)
+            raise
 
 
 def verify_backup(backup_path):
-    if db.DB_TYPE == 'postgresql':
-        try:
-            reader = gzip.open if _is_gz(backup_path) else open
-            ext = os.path.splitext(_strip_gz(backup_path))[1]
-            if ext == '.sql':
-                with reader(backup_path, 'rt', encoding='utf-8') as f:
-                    content = f.read(512)
-                    if 'pg_dump' not in content and 'PostgreSQL' not in content:
-                        logger.error(f"Backup {backup_path} is not a valid pg_dump SQL file")
-                        return None
-                return True
-            elif ext == '.json':
-                with reader(backup_path, 'rt', encoding='utf-8') as f:
-                    data = json.load(f)
-                if not isinstance(data, dict) or 'domains' not in data:
-                    logger.error(f"Backup {backup_path} has invalid JSON structure")
-                    return None
-                return len(data.get('domains', []))
-            else:
-                logger.error(f"Unknown PostgreSQL backup format: {backup_path}")
-                return None
-        except Exception as e:
-            logger.error(f"Backup verification failed for {backup_path}: {e}")
-            return None
-
     try:
         reader = gzip.open if _is_gz(backup_path) else open
-        with reader(backup_path, 'rb') as f:
-            header = f.read(16)
-            if header != b'SQLite format 3\x00':
-                logger.error(f"Backup {backup_path} has invalid SQLite header")
+        ext = os.path.splitext(_strip_gz(backup_path))[1]
+        if ext == '.sql':
+            with reader(backup_path, 'rt', encoding='utf-8') as f:
+                content = f.read(512)
+                if 'pg_dump' not in content and 'PostgreSQL' not in content:
+                    logger.error(f"Backup {backup_path} is not a valid pg_dump SQL file")
+                    return None
+            return True
+        elif ext == '.json':
+            with reader(backup_path, 'rt', encoding='utf-8') as f:
+                data = json.load(f)
+            if not isinstance(data, dict) or 'domains' not in data:
+                logger.error(f"Backup {backup_path} has invalid JSON structure")
                 return None
-
-        with reader(backup_path, 'rb') as f_in:
-            tmp = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
-            tmp_path = tmp.name
-            shutil.copyfileobj(f_in, tmp)
-            tmp.close()
-
-        conn = sqlite3.connect(tmp_path)
-        integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
-        if integrity != "ok":
-            conn.close()
-            logger.error(f"Backup {backup_path} failed integrity check: {integrity}")
-            os.unlink(tmp_path)
+            return len(data.get('domains', []))
+        else:
+            logger.error(f"Unknown PostgreSQL backup format: {backup_path}")
             return None
-
-        count = conn.execute("SELECT COUNT(*) FROM domains").fetchone()[0]
-        conn.close()
-        os.unlink(tmp_path)
-        return count
     except Exception as e:
         logger.error(f"Backup verification failed for {backup_path}: {e}")
         return None
@@ -418,83 +323,53 @@ def restore_backup(filename):
     if not os.path.exists(resolved):
         raise FileNotFoundError(f"Backup file not found: {filename}")
 
-    if db.DB_TYPE == 'postgresql':
-        ext = os.path.splitext(_strip_gz(resolved))[1]
-        reader = gzip.open if _is_gz(resolved) else open
-
-        if ext == '.sql':
-            host = os.environ.get('POSTGRES_HOST', 'localhost')
-            port = os.environ.get('POSTGRES_PORT', '5432')
-            pg_db = os.environ.get('POSTGRES_DB', 'vigil')
-            user = os.environ.get('POSTGRES_USER', 'vigil')
-            password = os.environ.get('POSTGRES_PASSWORD', '')
-            env = os.environ.copy()
-            env['PGPASSWORD'] = password
-            with reader(resolved, 'rt', encoding='utf-8') as f:
-                sql_data = f.read()
-            result = subprocess.run(
-                ['psql', '-h', host, '-p', port, '-U', user, '-d', pg_db, '-f', '-'],
-                input=sql_data, capture_output=True, text=True, env=env, timeout=120
-            )
-            if result.returncode != 0:
-                raise ValueError(f"psql restore failed: {result.stderr[:500]}")
-            logger.info(f"Database restored from {filename}")
-            return True
-        elif ext == '.json':
-            with reader(resolved, 'rt', encoding='utf-8') as f:
-                data = json.load(f)
-            conn = db.connect()
-            try:
-                for table, rows in data.items():
-                    if table not in _ALLOWED_BACKUP_TABLES:
-                        raise ValueError(f"Unexpected table in backup: {table}")
-                    for row in rows:
-                        for col in row:
-                            if col not in _ALLOWED_BACKUP_COLUMNS:
-                                raise ValueError(f"Unexpected column in backup: {table}.{col}")
-                        cols = ', '.join(row.keys())
-                        vals = ', '.join(['?' for _ in row])
-                        conn.execute(
-                            f"INSERT INTO {table} ({cols}) VALUES ({vals}) "
-                            f"ON CONFLICT DO NOTHING",
-                            tuple(row.values())
-                        )
-                conn.commit()
-            except Exception as e:
-                conn.rollback()
-                raise ValueError(f"PostgreSQL JSON restore failed: {e}")
-            finally:
-                conn.close()
-        else:
-            raise ValueError(f"Unknown PostgreSQL backup format: {filename}")
-
-        logger.info(f"Database restored from {filename}")
-        return True
-
-    # SQLite restore — decompress, verify integrity, then use backup API
+    ext = os.path.splitext(_strip_gz(resolved))[1]
     reader = gzip.open if _is_gz(resolved) else open
-    tmp_fd, tmp_path = tempfile.mkstemp(suffix='.db')
-    os.close(tmp_fd)
-    with reader(resolved, 'rb') as f_in:
-        with open(tmp_path, 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out)
 
-    conn = sqlite3.connect(tmp_path)
-    integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
-    if integrity != "ok":
-        conn.close()
-        os.unlink(tmp_path)
-        raise ValueError("Backup file is not a valid SQLite database")
+    if ext == '.sql':
+        host = os.environ.get('POSTGRES_HOST', 'localhost')
+        port = os.environ.get('POSTGRES_PORT', '5432')
+        pg_db = os.environ.get('POSTGRES_DB', 'vigil')
+        user = os.environ.get('POSTGRES_USER', 'vigil')
+        password = os.environ.get('POSTGRES_PASSWORD', '')
+        env = os.environ.copy()
+        env['PGPASSWORD'] = password
+        with reader(resolved, 'rt', encoding='utf-8') as f:
+            sql_data = f.read()
+        result = subprocess.run(
+            ['psql', '-h', host, '-p', port, '-U', user, '-d', pg_db, '-f', '-'],
+            input=sql_data, capture_output=True, text=True, env=env, timeout=120
+        )
+        if result.returncode != 0:
+            raise ValueError(f"psql restore failed: {result.stderr[:500]}")
+    elif ext == '.json':
+        with reader(resolved, 'rt', encoding='utf-8') as f:
+            data = json.load(f)
+        conn = db.connect()
+        try:
+            for table, rows in data.items():
+                if table not in _ALLOWED_BACKUP_TABLES:
+                    raise ValueError(f"Unexpected table in backup: {table}")
+                for row in rows:
+                    for col in row:
+                        if col not in _ALLOWED_BACKUP_COLUMNS:
+                            raise ValueError(f"Unexpected column in backup: {table}.{col}")
+                    cols = ', '.join(row.keys())
+                    vals = ', '.join(['?' for _ in row])
+                    conn.execute(
+                        f"INSERT INTO {table} ({cols}) VALUES ({vals}) "
+                        f"ON CONFLICT DO NOTHING",
+                        tuple(row.values())
+                    )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise ValueError(f"PostgreSQL JSON restore failed: {e}")
+        finally:
+            conn.close()
+    else:
+        raise ValueError(f"Unknown PostgreSQL backup format: {filename}")
 
-    # Use backup API — copies pages transactionally, handles WAL/SHM internally
-    live = sqlite3.connect(DB_PATH, timeout=30)
-    try:
-        conn.backup(live, pages=-1)
-    finally:
-        conn.close()
-        live.close()
-
-    os.unlink(tmp_path)
     logger.info(f"Database restored from {filename}")
     return True
 

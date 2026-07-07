@@ -3,13 +3,13 @@
 ## Project Overview
 
 **Vigil** — a self-hosted SSL certificate, domain expiry & web app monitoring web application.
-Tech: Flask + SQLite (WAL mode) + APScheduler + vanilla JS frontend.
+Tech: Flask + PostgreSQL + APScheduler + vanilla JS frontend.
 
 ## Conventions
 
 ### Python
 - **Flask** app factory pattern with `app.py` as entrypoint.
-- **No ORM** — raw `sqlite3` with `sqlite3.Row` dictionary access.
+- **No ORM** — raw `psycopg2` with `RealDictCursor` dictionary access.
 - **Models** in `ssl_domain_checker/models.py` — all DB logic lives here.
 - **Routes** defined as decorated functions in `app.py`.
 - Thread safety for WHOIS via `threading.Lock` + `ThreadPoolExecutor`.
@@ -35,17 +35,15 @@ Tech: Flask + SQLite (WAL mode) + APScheduler + vanilla JS frontend.
 - `relativeTime()` shows "X ago" with defensive NaN checks; `formatDurationLong()` shows exact seconds/minutes.
 
 ### Database
-- SQLite with WAL mode, foreign keys ON, busy timeout 5s.
-- `DB_PATH` defaults to `data_volume/ssl_checker.db`.
-- Migration strategy: `ALTER TABLE ADD COLUMN` guarded by `PRAGMA table_info()`.
+- PostgreSQL only. Connection pooled via `psycopg2.pool.ThreadedConnectionPool` in `db.py`.
+- Schema-per-deployment via `POSTGRES_SCHEMA` (`CREATE SCHEMA IF NOT EXISTS` + `SET search_path`).
+- Migration strategy: `ALTER TABLE ADD COLUMN` guarded by `information_schema.columns` (`db.table_columns()`).
 - First-run creates `admin` user with random password (logged to stderr at startup).
-- `users` table has `is_active` column — deactivated users blocked at login with "Account is deactivated" message.
+- `users` table has `is_active` boolean column — deactivated users blocked at login with "Account is deactivated" message. Note: `is_active` is a native Postgres boolean (JSON `true`/`false`), not `0`/`1` — frontend/backend code must compare with `!== false`, not `!== 0`, to catch both.
 
 ### Testing
 - Run: `pytest tests/ -v` (from project root).
-- Test DB uses temp directory, `DB_PATH` overridden in test.
-- Environment variables for testing set in `tests/conftest.py`.
-- 62 test functions across 7 test files.
+- Tests run against real PostgreSQL, each test file using its own fixed schema (`vigil_test_app`, `vigil_test_models`, `vigil_test_webapps`) that's dropped and recreated before every test — see `tests/pg_test_utils.py`. Never touches the app's real `POSTGRES_SCHEMA` data.
 
 ### Docker
 - Multi-stage build: `builder` stage compiles deps, runtime stage copies only.
@@ -69,8 +67,8 @@ Tech: Flask + SQLite (WAL mode) + APScheduler + vanilla JS frontend.
 5. Add corresponding JS in `static/app.js` using the `api()` helper.
 
 ### Adding a new DB table
-1. Add `CREATE TABLE IF NOT EXISTS` in `models.init_db()`.
-2. Add `ALTER TABLE` column migration in the existing fallback loop.
+1. Add `CREATE TABLE IF NOT EXISTS` to `_PG_SCHEMA` in `models.py`.
+2. Add `ALTER TABLE` column migration in `_run_postgres_migrations()`, guarded by `db.table_columns()`.
 3. Create getter/setter functions in `models.py`.
 
 ### Adding a new alert channel
