@@ -4027,6 +4027,8 @@ function populateSettingsForm(s) {
   document.getElementById('teams_webhook_url').value = s.teams_webhook_url || '';
   document.getElementById('teams_enabled').checked = s.teams_enabled !== 0;
   document.getElementById('generic_webhooks').value = (s.generic_webhooks || '[]');
+  document.getElementById('status_page_enabled').checked = s.status_page_enabled !== 0;
+  document.getElementById('status_page_title').value = s.status_page_title || '';
 
   _settingsOriginal = getSettingsFormData();
   _settingsDirty = false;
@@ -4054,6 +4056,8 @@ function getSettingsFormData() {
     teams_webhook_url: document.getElementById('teams_webhook_url').value,
     teams_enabled: document.getElementById('teams_enabled').checked,
     generic_webhooks: document.getElementById('generic_webhooks').value || '[]',
+    status_page_enabled: document.getElementById('status_page_enabled').checked,
+    status_page_title: document.getElementById('status_page_title').value,
   };
 }
 
@@ -4149,6 +4153,29 @@ document.getElementById('webhooks-form').addEventListener('submit', async (e) =>
     _settingsDirty = false;
     updateUnsavedIndicator();
     toast('Webhook settings saved');
+    sessionStorage.removeItem('vigil-settings');
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    setLoading(btn, false);
+  }
+});
+
+// ─── Status Page save ─────────────────────────────────────────
+document.getElementById('statuspage-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('btn-save-statuspage');
+  const changes = {
+    status_page_enabled: document.getElementById('status_page_enabled').checked ? 1 : 0,
+    status_page_title: document.getElementById('status_page_title').value || '',
+  };
+  setLoading(btn, true);
+  try {
+    await api('PUT', '/api/settings', changes);
+    _settingsOriginal = getSettingsFormData();
+    _settingsDirty = false;
+    updateUnsavedIndicator();
+    toast('Status page settings saved');
     sessionStorage.removeItem('vigil-settings');
   } catch (e) {
     toast(e.message, 'error');

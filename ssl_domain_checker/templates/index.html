@@ -824,6 +824,7 @@
 
         <button class="settings-tab" data-stab="emailtpl" tabindex="0">Email Templates</button>
         <button class="settings-tab" data-stab="maintenance" tabindex="0">Maintenance</button>
+        <button class="settings-tab" data-stab="statuspage" tabindex="0">Status Page</button>
       </div>
 
       <!-- SMTP -->
@@ -1226,6 +1227,28 @@
             <button type="button" class="btn btn-primary" data-action="save-maintenance-window" id="btn-save-mw">Save</button>
           </div>
         </div>
+      </div>
+
+      <!-- Status Page -->
+      <div class="settings-pane" id="stab-statuspage">
+        <div class="pane-header">
+          <div>
+            <h3>Public Status Page</h3>
+            <p class="pane-subtitle">Enable a public-facing status page at <code>/status</code> showing the health of all monitored services.</p>
+          </div>
+        </div>
+        <form class="settings-form" id="statuspage-form">
+          <div class="form-row checkbox-row">
+            <label><input type="checkbox" id="status_page_enabled"> Enable public status page</label>
+          </div>
+          <div class="form-row">
+            <label for="status_page_title">Page Title</label>
+            <input type="text" id="status_page_title" placeholder="System Status">
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="btn-save-statuspage">Save Status Page Settings</button>
+          </div>
+        </form>
       </div>
 
       <div class="settings-footer">

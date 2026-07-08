@@ -421,7 +421,8 @@ _MIGRATION_SETTINGS_COLS = frozenset({
     'telegram_bot_token', 'telegram_chat_id', 'telegram_enabled',
     'teams_webhook_url', 'teams_enabled',
     'backup_schedule_hour', 'backup_schedule_minute', 'max_backups',
-    'log_retention_days', 'generic_webhooks',
+    'log_retention_days', 'generic_webhooks', 'status_page_enabled',
+    'status_page_title',
 })
 
 
@@ -477,6 +478,10 @@ def _run_postgres_migrations():
         conn.execute("ALTER TABLE settings ADD COLUMN log_retention_days INTEGER DEFAULT 90")
     if 'generic_webhooks' not in db.table_columns('settings'):
         conn.execute("ALTER TABLE settings ADD COLUMN generic_webhooks TEXT DEFAULT '[]'")
+    if 'status_page_enabled' not in db.table_columns('settings'):
+        conn.execute("ALTER TABLE settings ADD COLUMN status_page_enabled BOOLEAN DEFAULT FALSE")
+    if 'status_page_title' not in db.table_columns('settings'):
+        conn.execute("ALTER TABLE settings ADD COLUMN status_page_title TEXT DEFAULT 'System Status'")
 
     for col, dtype in [
         ('slack_webhook_url', 'TEXT'), ('slack_enabled', 'BOOLEAN'),

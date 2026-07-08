@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ page_title }} — Vigil</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; background: #f0f2f5; color: #1a1a2e; min-height: 100vh; }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 16px; }
+  header { text-align: center; margin-bottom: 32px; }
+  header h1 { font-size: 28px; font-weight: 700; color: #1a1a2e; margin-bottom: 4px; }
+  header p { font-size: 14px; color: #64748b; }
+  .last-updated { font-size: 13px; color: #94a3b8; margin-top: 8px; }
+  .overall { display: flex; gap: 16px; justify-content: center; margin-bottom: 32px; flex-wrap: wrap; }
+  .overall-badge { padding: 12px 24px; border-radius: 12px; font-size: 15px; font-weight: 600; text-align: center; min-width: 140px; }
+  .overall-badge.all-up { background: #d1fae5; color: #065f46; }
+  .overall-badge.has-issues { background: #fef3c7; color: #92400e; }
+  .overall-badge.has-down { background: #fee2e2; color: #991b1b; }
+  .section { margin-bottom: 28px; }
+  .section h2 { font-size: 18px; font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; color: #334155; display: flex; align-items: center; gap: 8px; }
+  .section h2 .count { font-size: 13px; font-weight: 400; color: #94a3b8; }
+  .item { background: #fff; border-radius: 10px; padding: 14px 18px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border-left: 4px solid #e2e8f0; }
+  .item.up { border-left-color: #22c55e; }
+  .item.down { border-left-color: #ef4444; }
+  .item.expired { border-left-color: #ef4444; }
+  .item.expiring_soon { border-left-color: #f59e0b; }
+  .item.warning { border-left-color: #f59e0b; }
+  .item.caution { border-left-color: #f59e0b; }
+  .item.critical { border-left-color: #ef4444; }
+  .item.healthy { border-left-color: #22c55e; }
+  .item.pending { border-left-color: #94a3b8; }
+  .item.slow { border-left-color: #f59e0b; }
+  .item.unknown { border-left-color: #94a3b8; }
+  .item.error { border-left-color: #ef4444; }
+  .item-info { flex: 1; min-width: 0; }
+  .item-name { font-size: 15px; font-weight: 500; color: #1e293b; }
+  .item-name small { font-weight: 400; color: #64748b; font-size: 13px; }
+  .item-detail { font-size: 13px; color: #64748b; margin-top: 2px; }
+  .item-status { font-size: 13px; font-weight: 600; padding: 4px 12px; border-radius: 20px; white-space: nowrap; }
+  .item-status.up, .item-status.healthy { background: #d1fae5; color: #065f46; }
+  .item-status.down, .item-status.expired, .item-status.critical, .item-status.error { background: #fee2e2; color: #991b1b; }
+  .item-status.warning, .item-status.caution, .item-status.expiring_soon, .item-status.slow { background: #fef3c7; color: #92400e; }
+  .item-status.pending, .item-status.unknown { background: #f1f5f9; color: #475569; }
+  .item-response { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+  .empty-state { text-align: center; color: #94a3b8; padding: 32px; font-size: 14px; }
+  footer { text-align: center; padding: 24px; font-size: 12px; color: #94a3b8; }
+  footer a { color: #6366f1; text-decoration: none; }
+  @media (max-width: 640px) { .item { flex-wrap: wrap; } .item-status { margin-left: auto; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>{{ page_title }}</h1>
+    <p>Real-time status of all monitored services</p>
+    <div class="last-updated">Last updated: {{ now }}</div>
+  </header>
+
+  {% set has_down = domains|selectattr('status', 'in', ['down','expired','error'])|list|length > 0
+    or webapps|selectattr('status', 'in', ['down','error'])|list|length > 0
+    or port_checks|selectattr('status', 'in', ['down','error'])|list|length > 0
+    or dns_checks|selectattr('status', 'in', ['down','error'])|list|length > 0 %}
+  {% set has_issues = has_down
+    or domains|selectattr('status', 'in', ['warning','caution','expiring_soon'])|list|length > 0
+    or webapps|selectattr('status', 'equalto', 'slow')|list|length > 0 %}
+
+  <div class="overall">
+    {% if has_down %}
+      <div class="overall-badge has-down">&#9888; Service Disruption</div>
+    {% elif has_issues %}
+      <div class="overall-badge has-issues">&#9888; Some Issues</div>
+    {% else %}
+      <div class="overall-badge all-up">&#10003; All Systems Operational</div>
+    {% endif %}
+  </div>
+
+  {% if domains %}
+  <div class="section">
+    <h2>Domains &amp; SSL <span class="count">({{ domains|length }})</span></h2>
+    {% for d in domains %}
+    <div class="item {{ d.status or 'unknown' }}">
+      <div class="item-info">
+        <div class="item-name">{{ d.url }} <small>{{ d.type }}</small></div>
+        <div class="item-detail">
+          {% if d.ssl_status %}SSL: {{ d.ssl_status }}{% if d.ssl_days_left is not none %} ({{ d.ssl_days_left }}d){% endif %}{% endif %}
+          {% if d.domain_status %}{% if d.ssl_status %} &middot; {% endif %}Domain: {{ d.domain_status }}{% if d.domain_days_left is not none %} ({{ d.domain_days_left }}d){% endif %}{% endif %}
+        </div>
+      </div>
+      <div class="item-status {{ d.status }}">{{ d.status }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if webapps %}
+  <div class="section">
+    <h2>Web Applications <span class="count">({{ webapps|length }})</span></h2>
+    {% for w in webapps %}
+    <div class="item {{ w.status or 'unknown' }}">
+      <div class="item-info">
+        <div class="item-name">{{ w.name }}</div>
+        <div class="item-detail">{{ w.url }}</div>
+      </div>
+      <div class="item-response">{% if w.last_response_time_ms is not none %}{{ w.last_response_time_ms }}ms{% endif %}</div>
+      <div class="item-status {{ w.status }}">{{ w.status }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if port_checks %}
+  <div class="section">
+    <h2>Port Checks <span class="count">({{ port_checks|length }})</span></h2>
+    {% for p in port_checks %}
+    <div class="item {{ p.status or 'unknown' }}">
+      <div class="item-info">
+        <div class="item-name">{{ p.name }}</div>
+        <div class="item-detail">{{ p.hostname }}:{{ p.port }}</div>
+      </div>
+      <div class="item-response">{% if p.last_response_time_ms is not none %}{{ p.last_response_time_ms }}ms{% endif %}</div>
+      <div class="item-status {{ p.status }}">{{ p.status }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if dns_checks %}
+  <div class="section">
+    <h2>DNS Records <span class="count">({{ dns_checks|length }})</span></h2>
+    {% for d in dns_checks %}
+    <div class="item {{ d.status or 'unknown' }}">
+      <div class="item-info">
+        <div class="item-name">{{ d.name }}</div>
+        <div class="item-detail">{{ d.hostname }} ({{ d.record_type }})</div>
+      </div>
+      <div class="item-status {{ d.status }}">{{ d.status }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if not domains and not webapps and not port_checks and not dns_checks %}
+  <div class="empty-state">No services are being monitored yet.</div>
+  {% endif %}
+</div>
+<footer>
+  Powered by <a href="https://github.com/mlsario/vigil">Vigil</a> &middot; <a href="/">Sign In</a>
+</footer>
+</body>
+</html>

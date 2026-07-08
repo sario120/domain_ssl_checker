@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
-from flask import Flask, g, jsonify, request, session, redirect, send_from_directory, send_file
+from flask import Flask, g, jsonify, request, session, redirect, render_template, send_from_directory, send_file
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 
@@ -2311,6 +2311,78 @@ def dashboard():
 @app.route('/invite/<token>')
 def invite_page(token):
     return send_from_directory(app.template_folder, 'invite.html')
+
+
+# ─── Public Status Page ────────────────────────────────────────
+@app.route('/status')
+def public_status_page():
+    settings = models.get_settings()
+    if not settings.get('status_page_enabled'):
+        return "<h1>Status page is disabled</h1><p>Contact the administrator for more information.</p>", 404
+    page_title = settings.get('status_page_title', 'System Status')
+    domains = models.get_domains()
+    webapps = models.get_webapps()
+    port_checks = models.get_port_checks()
+    dns_checks = models.get_dns_checks()
+
+    return render_template('status.html',
+        page_title=page_title,
+        domains=domains,
+        webapps=webapps,
+        port_checks=port_checks,
+        dns_checks=dns_checks,
+        now=models.timezone_now_str(),
+    )
+
+
+@app.route('/api/status')
+def public_status_api():
+    settings = models.get_settings()
+    if not settings.get('status_page_enabled'):
+        return api_error('Status page is disabled', 404)
+    domains = models.get_domains()
+    webapps = models.get_webapps()
+    port_checks = models.get_port_checks()
+    dns_checks = models.get_dns_checks()
+
+    def safe_domain(d):
+        return {
+            'url': d['url'], 'type': d.get('type'), 'status': d.get('status', 'unknown'),
+            'ssl_status': d.get('ssl_status'), 'ssl_days_left': d.get('ssl_days_left'),
+            'domain_status': d.get('domain_status'), 'domain_days_left': d.get('domain_days_left'),
+            'last_checked': d.get('last_checked'),
+        }
+
+    def safe_webapp(w):
+        return {
+            'name': w.get('name'), 'url': w.get('url'), 'status': w.get('status', 'unknown'),
+            'last_response_time_ms': w.get('last_response_time_ms'),
+            'last_checked': w.get('last_checked'),
+        }
+
+    def safe_port(p):
+        return {
+            'name': p.get('name'), 'hostname': p.get('hostname'), 'port': p.get('port'),
+            'status': p.get('status', 'unknown'), 'last_response_time_ms': p.get('last_response_time_ms'),
+            'last_checked': p.get('last_checked'),
+        }
+
+    def safe_dns(d):
+        return {
+            'name': d.get('name'), 'hostname': d.get('hostname'), 'record_type': d.get('record_type'),
+            'status': d.get('status', 'unknown'), 'last_result': d.get('last_result'),
+            'last_checked': d.get('last_checked'),
+        }
+
+    page_title = settings.get('status_page_title', 'System Status')
+    return jsonify({
+        'page_title': page_title,
+        'domains': [safe_domain(d) for d in domains],
+        'webapps': [safe_webapp(w) for w in webapps],
+        'port_checks': [safe_port(p) for p in port_checks],
+        'dns_checks': [safe_dns(d) for d in dns_checks],
+        'generated_at': models.timezone_now_str(),
+    })
 
 
 # ─── Background scheduler ──────────────────────────────────────
