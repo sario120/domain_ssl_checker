@@ -4026,6 +4026,7 @@ function populateSettingsForm(s) {
   document.getElementById('telegram_enabled').checked = s.telegram_enabled !== 0;
   document.getElementById('teams_webhook_url').value = s.teams_webhook_url || '';
   document.getElementById('teams_enabled').checked = s.teams_enabled !== 0;
+  document.getElementById('generic_webhooks').value = (s.generic_webhooks || '[]');
 
   _settingsOriginal = getSettingsFormData();
   _settingsDirty = false;
@@ -4052,6 +4053,7 @@ function getSettingsFormData() {
     telegram_enabled: document.getElementById('telegram_enabled').checked,
     teams_webhook_url: document.getElementById('teams_webhook_url').value,
     teams_enabled: document.getElementById('teams_enabled').checked,
+    generic_webhooks: document.getElementById('generic_webhooks').value || '[]',
   };
 }
 
@@ -4138,6 +4140,7 @@ document.getElementById('webhooks-form').addEventListener('submit', async (e) =>
     telegram_enabled: document.getElementById('telegram_enabled').checked ? 1 : 0,
     teams_webhook_url: document.getElementById('teams_webhook_url').value || '',
     teams_enabled: document.getElementById('teams_enabled').checked ? 1 : 0,
+    generic_webhooks: document.getElementById('generic_webhooks').value || '[]',
   };
   setLoading(btn, true);
   try {

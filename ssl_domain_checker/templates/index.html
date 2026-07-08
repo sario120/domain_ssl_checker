@@ -982,6 +982,14 @@
               <span id="test-teams-result" class="inline-result"></span>
             </div>
           </fieldset>
+          <fieldset>
+            <legend>Generic Webhooks</legend>
+            <div class="form-row">
+              <label for="generic_webhooks">Webhook Configurations (JSON)</label>
+              <textarea id="generic_webhooks" rows="8" placeholder='[{"name":"My Webhook","url":"https://example.com/webhook","method":"POST","headers":{"Content-Type":"application/json"},"body_template":"{\"alert\":\"{status}\",\"domain\":\"{domain_name}\"}","enabled":true}]'></textarea>
+              <span class="field-hint">JSON array of webhook configs. Each entry supports: name, url, method, headers (object), body_template (use {domain_name}, {status}, {ssl_days_left}, {domain_days_left}), enabled</span>
+            </div>
+          </fieldset>
           <div class="form-actions">
             <button type="submit" class="btn btn-primary" id="btn-save-webhooks">Save Webhook Settings</button>
           </div>

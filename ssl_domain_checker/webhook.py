@@ -1,4 +1,5 @@
 import ipaddress
+import json
 import logging
 from urllib.parse import urlparse, parse_qs
 
@@ -76,6 +77,19 @@ def send_webhook_alerts(domain_name, status, ssl_days_left, domain_days_left, se
             _send_teams(teams_url, domain_name, status, ssl_days_left, domain_days_left, domain_data)
         except Exception as e:
             errors.append(f"Teams: {e}")
+    generic_raw = settings.get('generic_webhooks', '[]')
+    if generic_raw:
+        try:
+            generic_list = json.loads(generic_raw) if isinstance(generic_raw, str) else generic_raw
+            for gw in generic_list:
+                if not gw.get('enabled') or not gw.get('url'):
+                    continue
+                try:
+                    _send_generic(gw, domain_name, status, ssl_days_left, domain_days_left, domain_data)
+                except Exception as e:
+                    errors.append(f"Generic({gw.get('name', '?')}): {e}")
+        except (json.JSONDecodeError, TypeError):
+            errors.append("Generic webhooks: invalid JSON configuration")
     return errors
 
 
@@ -158,6 +172,11 @@ def send_test_webhook(webhook_type, webhook_url, settings=None):
             "text": "This is a test from Vigil SSL Checker. If you see this, your Teams webhook is configured correctly.",
         }
         resp = requests.post(webhook_url, json=payload, timeout=10, verify=True)
+    elif webhook_type == 'generic':
+        payload = webhook_url
+        method = 'POST'
+        headers = {}
+        resp = requests.request(method, webhook_url, headers=headers, data=payload, timeout=10, verify=True)
     else:
         raise ValueError(f"Unknown webhook type: {webhook_type}")
     if resp.status_code not in (200, 204):
@@ -252,3 +271,32 @@ def _send_zulip(webhook_url, domain_name, status, ssl_days_left, domain_days_lef
     }, timeout=10, verify=True)
     if resp.status_code != 200:
         raise Exception(f"HTTP {resp.status_code}")
+
+
+def _send_generic(config, domain_name, status, ssl_days_left, domain_days_left, domain_data=None):
+    url = config['url']
+    if not validate_webhook_url(url):
+        raise ValueError("Blocked: unsafe webhook URL")
+
+    method = config.get('method', 'POST').upper()
+    headers = config.get('headers', {})
+    if isinstance(headers, str):
+        try:
+            headers = json.loads(headers)
+        except (json.JSONDecodeError, TypeError):
+            headers = {}
+    body_template = config.get('body_template', '')
+
+    ssl_line = f'"ssl_days_left": {ssl_days_left}' if ssl_days_left is not None else ''
+    domain_line = f'"domain_days_left": {domain_days_left}' if domain_days_left is not None else ''
+
+    payload = body_template.format(
+        domain_name=domain_name,
+        status=status,
+        ssl_days_left=ssl_days_left or '',
+        domain_days_left=domain_days_left or '',
+    )
+
+    resp = requests.request(method, url, headers=headers, data=payload, timeout=10, verify=True)
+    if resp.status_code >= 400:
+        raise Exception(f"HTTP {resp.status_code}: {resp.text[:200]}")
