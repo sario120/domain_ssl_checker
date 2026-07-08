@@ -515,6 +515,7 @@
               <label class="col-check"><input type="checkbox" data-col="col-status" checked> Status</label>
               <label class="col-check"><input type="checkbox" data-col="col-response" checked> Response Time</label>
               <label class="col-check"><input type="checkbox" data-col="col-code" checked> Status Code</label>
+              <label class="col-check"><input type="checkbox" data-col="col-body-match" checked> Body Match</label>
               <label class="col-check"><input type="checkbox" data-col="col-uptime" checked> Uptime %</label>
               <label class="col-check"><input type="checkbox" data-col="col-notes" checked> Notes</label>
               <label class="col-check"><input type="checkbox" data-col="col-sparkline" checked> Activity</label>
@@ -529,7 +530,7 @@
       <div id="webapp-list" class="domain-list"></div>
       <div id="webapp-skeleton" class="domain-list" style="display:none"></div>
       <div class="domain-table-wrapper"><table id="webapp-table" class="domain-table" style="display:none">
-        <thead><tr><th class="col-checkbox"></th><th class="col-name" data-sort="name" data-type="webapp">Name <span class="sort-arrow"></span></th><th class="col-url" data-sort="url" data-type="webapp">URL <span class="sort-arrow"></span></th><th class="col-status" data-sort="status" data-type="webapp">Status <span class="sort-arrow"></span></th><th class="col-response" data-sort="response_time" data-type="webapp">Response Time <span class="sort-arrow"></span></th><th class="col-code" data-sort="code" data-type="webapp">Status Code <span class="sort-arrow"></span></th><th class="col-uptime" data-sort="uptime_pct" data-type="webapp">Uptime % <span class="sort-arrow"></span></th><th class="col-sparkline">Activity</th><th class="col-checked" data-sort="checked" data-type="webapp">Last Checked <span class="sort-arrow"></span></th><th class="col-actions">Actions</th></tr></thead>
+        <thead><tr><th class="col-checkbox"></th><th class="col-name" data-sort="name" data-type="webapp">Name <span class="sort-arrow"></span></th><th class="col-url" data-sort="url" data-type="webapp">URL <span class="sort-arrow"></span></th><th class="col-status" data-sort="status" data-type="webapp">Status <span class="sort-arrow"></span></th><th class="col-response" data-sort="response_time" data-type="webapp">Response Time <span class="sort-arrow"></span></th><th class="col-code" data-sort="code" data-type="webapp">Status Code <span class="sort-arrow"></span></th><th class="col-body-match">Body Match</th><th class="col-uptime" data-sort="uptime_pct" data-type="webapp">Uptime % <span class="sort-arrow"></span></th><th class="col-sparkline">Activity</th><th class="col-checked" data-sort="checked" data-type="webapp">Last Checked <span class="sort-arrow"></span></th><th class="col-actions">Actions</th></tr></thead>
         <tbody id="webapp-table-body"></tbody>
       </table></div>
       <div class="pagination-wrapper" id="pagination-webapp" style="display:none">
@@ -1333,6 +1334,9 @@
           <label for="webapp-expected-body">Expected Body Contains</label>
           <input type="text" id="webapp-expected-body" placeholder="Optional: substring to match in response">
         </div>
+        <div class="form-row form-checkbox-row">
+          <label><input type="checkbox" id="webapp-expected-body-negate"> Must NOT contain (invert match)</label>
+        </div>
         <div class="form-row">
           <label for="webapp-timeout">Timeout (seconds)</label>
           <input type="number" id="webapp-timeout" value="10" min="1" max="120">
@@ -1447,10 +1451,11 @@
           </div>
         </div>
 
-        <!-- Recent checks stat -->
+        <!-- Content match & checks -->
         <div class="detail-recent-checks" style="display:flex;gap:16px;padding:8px 0;font-size:13px;flex-wrap:wrap">
           <span>Last 25 checks: <strong id="detail-wa-recent-checks">—</strong></span>
           <span>Status Code: <strong id="detail-wa-status-code">—</strong></span>
+          <span id="detail-wa-body-match" style="display:none">Content: <strong id="detail-wa-body-match-text"></strong></span>
         </div>
 
         <!-- Uptime grid -->

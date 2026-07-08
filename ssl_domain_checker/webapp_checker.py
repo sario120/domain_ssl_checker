@@ -17,6 +17,7 @@ def check_webapp(wa):
     timeout = wa.get('timeout', 10)
     expected_status = wa.get('expected_status', 200)
     expected_body = wa.get('expected_body')
+    expected_body_negate = wa.get('expected_body_negate', False)
     headers_raw = wa.get('headers')
     body = wa.get('body')
 
@@ -62,11 +63,19 @@ def check_webapp(wa):
                 result['error'] = f"Expected status {expected_status}, got {resp.status}"
             elif expected_body:
                 body_text = resp.read().decode('utf-8', errors='replace')
-                if expected_body in body_text:
-                    result['status'] = 'up' if elapsed < SLOW_THRESHOLD_MS else 'slow'
+                found = expected_body in body_text
+                if expected_body_negate:
+                    if found:
+                        result['status'] = 'down'
+                        result['error'] = f"Body should NOT contain '{expected_body}'"
+                    else:
+                        result['status'] = 'up' if elapsed < SLOW_THRESHOLD_MS else 'slow'
                 else:
-                    result['status'] = 'down'
-                    result['error'] = f"Expected body containing '{expected_body}' not found"
+                    if found:
+                        result['status'] = 'up' if elapsed < SLOW_THRESHOLD_MS else 'slow'
+                    else:
+                        result['status'] = 'down'
+                        result['error'] = f"Expected body containing '{expected_body}' not found"
             else:
                 result['status'] = 'up' if elapsed < SLOW_THRESHOLD_MS else 'slow'
     except urllib.error.HTTPError as e:

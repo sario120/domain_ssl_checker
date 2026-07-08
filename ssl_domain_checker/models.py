@@ -420,6 +420,8 @@ def _run_postgres_migrations():
         conn.execute("ALTER TABLE webapps ADD COLUMN status_changed_at TIMESTAMPTZ")
     if 'tags' not in db.table_columns('webapps'):
         conn.execute("ALTER TABLE webapps ADD COLUMN tags TEXT DEFAULT ''")
+    if 'expected_body_negate' not in db.table_columns('webapps'):
+        conn.execute("ALTER TABLE webapps ADD COLUMN expected_body_negate BOOLEAN DEFAULT FALSE")
 
     conn.commit()
 
@@ -1479,15 +1481,15 @@ def get_webapp(webapp_id):
 
 
 def add_webapp(name, url, method='GET', expected_status=200, expected_body=None,
-               timeout=10, headers=None, body=None, check_interval=300,
+               expected_body_negate=False, timeout=10, headers=None, body=None, check_interval=300,
                notify_on_down=True, notify_on_recovery=True, notes='', tags=''):
     conn = get_db()
     try:
         cur = conn.execute(
-            "INSERT INTO webapps (name, url, method, expected_status, expected_body, "
+            "INSERT INTO webapps (name, url, method, expected_status, expected_body, expected_body_negate, "
             "timeout, headers, body, check_interval, notify_on_down, notify_on_recovery, notes, tags) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
-            (name, url, method, expected_status, expected_body,
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            (name, url, method, expected_status, expected_body, bool(expected_body_negate),
              timeout, headers, body, check_interval,
              bool(notify_on_down), bool(notify_on_recovery), notes, tags)
         )
@@ -1501,7 +1503,7 @@ def add_webapp(name, url, method='GET', expected_status=200, expected_body=None,
 
 
 def update_webapp(webapp_id, **kwargs):
-    allowed = frozenset({'name', 'url', 'method', 'expected_status', 'expected_body',
+    allowed = frozenset({'name', 'url', 'method', 'expected_status', 'expected_body', 'expected_body_negate',
                          'timeout', 'headers', 'body', 'check_interval', 'notes', 'tags',
                          'notify_on_down', 'notify_on_recovery', 'is_active'})
     sets = []

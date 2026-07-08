@@ -1777,6 +1777,10 @@ body.dark .badge-json { background: rgba(249,115,22,0.15); color: #fdba74; borde
 
 /* Card notes for webapp cards */
 .card-notes { font-size: 11px; color: var(--text-muted); font-style: italic; }
+.card-body-match { font-size: 11px; color: var(--primary); border-bottom: 1px dotted var(--primary); cursor: help; }
+.card-body-match.negate { color: var(--orange); border-bottom-color: var(--orange); }
+.body-match-text { font-size: 11px; color: var(--primary); border-bottom: 1px dotted var(--primary); cursor: help; }
+.body-match-text.negate { color: var(--orange); border-bottom-color: var(--orange); }
 
 /* Uptime bar health colors */
 .uptime-bar.uptime-bar-good { background: var(--green); }

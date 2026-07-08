@@ -811,6 +811,7 @@ def create_webapp(data):
         method=data.get('method', 'GET'),
         expected_status=data.get('expected_status', 200),
         expected_body=data.get('expected_body'),
+        expected_body_negate=data.get('expected_body_negate', False),
         timeout=data.get('timeout', 10),
         headers=json.dumps(data.get('headers', {})) if data.get('headers') else None,
         body=data.get('body'),
@@ -833,7 +834,7 @@ def update_webapp(webapp_id):
     if not app_data:
         return api_error('Webapp not found', 404)
     data = request.get_json(silent=True) or {}
-    allowed_keys = ('name', 'url', 'method', 'expected_status', 'expected_body',
+    allowed_keys = ('name', 'url', 'method', 'expected_status', 'expected_body', 'expected_body_negate',
                     'timeout', 'check_interval', 'notify_on_down', 'notify_on_recovery',
                     'notes', 'tags', 'is_active')
     kwargs = {}

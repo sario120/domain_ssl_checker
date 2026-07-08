@@ -877,6 +877,7 @@ document.getElementById('webapp-form').addEventListener('submit', async (e) => {
     method: document.getElementById('webapp-method').value,
     expected_status: parseInt(document.getElementById('webapp-expected-status').value) || 200,
     expected_body: document.getElementById('webapp-expected-body').value.trim() || null,
+    expected_body_negate: document.getElementById('webapp-expected-body-negate').checked || false,
     timeout: parseInt(document.getElementById('webapp-timeout').value) || 10,
     check_interval: parseInt(document.getElementById('webapp-check-interval').value) || 300,
     headers: document.getElementById('webapp-headers').value.trim() || null,
@@ -1898,6 +1899,16 @@ function openWebAppDetail(wa) {
   // Status code
   document.getElementById('detail-wa-status-code').textContent = wa.last_status_code || '—';
 
+  // Content match
+  var bodyMatchEl = document.getElementById('detail-wa-body-match');
+  var bodyMatchText = document.getElementById('detail-wa-body-match-text');
+  if (wa.expected_body) {
+    bodyMatchEl.style.display = '';
+    bodyMatchText.textContent = (wa.expected_body_negate ? 'NOT ' : 'CONTAINS ') + wa.expected_body;
+  } else {
+    bodyMatchEl.style.display = 'none';
+  }
+
   // Set loading state
   var durationEl = document.getElementById('detail-wa-current-duration');
   durationEl.innerHTML = '<span class="detail-loading">Loading...</span>';
@@ -2087,7 +2098,7 @@ function renderWebAppCardHtml(a) {
     '<strong class="card-url">' + escHtml(a.name || a.url) + '</strong>' +
     '<span class="card-time">' + escUrl(a.url) + '</span>' +
     '</div>' +
-    '<div class="card-meta"><span>Response: ' + rt + '</span><span>HTTP ' + code + '</span><span>Uptime: ' + uptimePct + '</span><span>Checked: ' + checked + '</span>' + (a.notes ? '<span class="card-notes" title="' + escHtml(a.notes) + '">&#x1F4DD; ' + escHtml(a.notes.length > 30 ? a.notes.slice(0, 27) + '...' : a.notes) + '</span>' : '') + '</div>' + renderWebappTagsHtml(a) +
+    '<div class="card-meta"><span>Response: ' + rt + '</span><span>HTTP ' + code + '</span><span>Uptime: ' + uptimePct + '</span><span>Checked: ' + checked + '</span>' + (a.expected_body ? '<span class="card-body-match' + (a.expected_body_negate ? ' negate' : '') + '" title="Body ' + (a.expected_body_negate ? 'must NOT contain' : 'must contain') + ': ' + escHtml(a.expected_body) + '">' + (a.expected_body_negate ? 'NOT ' : '') + escHtml(a.expected_body.length > 20 ? a.expected_body.slice(0, 17) + '...' : a.expected_body) + '</span>' : '') + (a.notes ? '<span class="card-notes" title="' + escHtml(a.notes) + '">&#x1F4DD; ' + escHtml(a.notes.length > 30 ? a.notes.slice(0, 27) + '...' : a.notes) + '</span>' : '') + '</div>' + renderWebappTagsHtml(a) +
     '<div class="webapp-sparkline" id="spark-wa-' + a.id + '" style="height:40px;margin-top:4px"></div>' +
     '</div>' +
     '<div class="card-actions">' +
@@ -2201,6 +2212,7 @@ function renderWebAppTable(apps) {
       '<td class="col-status"><span class="domain-badge status-badge ' + cls + '">' + st.toUpperCase() + '</span></td>' +
       '<td class="col-response">' + rt + '</td>' +
       '<td class="col-code">' + code + '</td>' +
+      '<td class="col-body-match">' + (a.expected_body ? '<span class="body-match-text' + (a.expected_body_negate ? ' negate' : '') + '" title="Body ' + (a.expected_body_negate ? 'must NOT contain' : 'must contain') + ': ' + escHtml(a.expected_body) + '">' + (a.expected_body_negate ? 'NOT ' : '') + escHtml(a.expected_body.length > 20 ? a.expected_body.slice(0, 17) + '...' : a.expected_body) + '</span>' : '—') + '</td>' +
       '<td class="col-uptime">' + uptimePct + '</td>' +
       '<td class="col-sparkline"><div class="webapp-sparkline" id="spark-wa-' + a.id + '" style="height:40px"></div></td>' +
       '<td class="col-checked">' + checked + '</td>' +
@@ -2216,7 +2228,7 @@ function renderWebAppTable(apps) {
       '<hr class="actions-divider" role="separator">' +
       '<button role="menuitem" class="dropdown-item-danger" data-action="webapp-delete" data-id="' + a.id + '"><span class="dropdown-item-icon">&#x1F5D1;</span><span class="dropdown-item-label">Delete</span></button>' +
       '</div></div></td></tr>';
-  }).join('') || '<tr><td colspan="10" class="empty-state"><p>No web apps match your filters.</p></td></tr>';
+  }).join('') || '<tr><td colspan="11" class="empty-state"><p>No web apps match your filters.</p></td></tr>';
   updateWebappBulkToolbar();
   // Apply persisted column visibility
   Object.keys(_webappVisibleCols).forEach(function (col) {
@@ -2280,6 +2292,7 @@ function openWebAppModal(app) {
   document.getElementById('webapp-method').value = app ? (app.method || 'GET') : 'GET';
   document.getElementById('webapp-expected-status').value = app ? (app.expected_status || 200) : 200;
   document.getElementById('webapp-expected-body').value = app ? (app.expected_body || '') : '';
+  document.getElementById('webapp-expected-body-negate').checked = app ? (app.expected_body_negate ? true : false) : false;
   document.getElementById('webapp-timeout').value = app ? (app.timeout || 10) : 10;
   document.getElementById('webapp-check-interval').value = app ? (app.check_interval || 300) : 300;
   document.getElementById('webapp-headers').value = app && app.headers ? (typeof app.headers === 'string' ? app.headers : JSON.stringify(app.headers, null, 2)) : '';
