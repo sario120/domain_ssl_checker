@@ -620,11 +620,12 @@ _ALLOWED_SETTINGS_COLS = frozenset({
     'telegram_bot_token', 'telegram_chat_id', 'telegram_enabled',
     'teams_webhook_url', 'teams_enabled',
     'email_templates', 'backup_schedule_hour', 'backup_schedule_minute', 'max_backups',
-    'log_retention_days',
+    'log_retention_days', 'generic_webhooks', 'status_page_enabled', 'status_page_title',
 })
 _ALLOWED_USER_COLS = frozenset({'password', 'role', 'email'})
 _BOOLEAN_SETTINGS_COLS = frozenset({'smtp_enabled', 'slack_enabled', 'zulip_enabled',
-                                     'discord_enabled', 'telegram_enabled', 'teams_enabled'})
+                                     'discord_enabled', 'telegram_enabled', 'teams_enabled',
+                                     'status_page_enabled'})
 
 
 def update_domain(domain_id, url=None, domain_type=None, notes=None, manual_expiry_date=None, manual_registrar=None, ct_monitoring_enabled=None):
