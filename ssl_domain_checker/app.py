@@ -32,6 +32,7 @@ import scheduler as sched_mod
 from checker import check_domain
 import webapp_checker
 import dns_checker
+import port_checker
 from alert import send_alerts, test_smtp, send_check_complete_summary, send_invite_email, _resolve_smtp_config
 from webhook import send_webhook_alerts, validate_webhook_url
 from scheduler import start_scheduler, get_next_scheduled_check
@@ -1386,6 +1387,115 @@ def _maybe_send_dns_alert(dc, result, settings, previous_status=None):
         models.update_dns_last_alerted(dc['id'])
 
 
+# ─── Port Checks ──────────────────────────────────────────────
+@app.route('/api/port-checks', methods=['GET'])
+@login_required
+def list_port_checks():
+    return jsonify(models.get_port_checks())
+
+
+@app.route('/api/port-checks', methods=['POST'])
+@admin_required
+@csrf_required
+@json_body({'name': True, 'hostname': True})
+def create_port_check(data):
+    result = models.add_port_check(data)
+    return jsonify(result), 201 if result.get('ok') else 400
+
+
+@app.route('/api/port-checks/<int:check_id>', methods=['PUT'])
+@admin_required
+@csrf_required
+def update_port_check(check_id):
+    pc = models.get_port_check(check_id)
+    if not pc:
+        return api_error('Port check not found', 404)
+    kwargs = {k: request.json[k] for k in request.json if k in models._ALLOWED_PORT_CHECK_COLS}
+    models.update_port_check(check_id, **kwargs)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/port-checks/<int:check_id>', methods=['DELETE'])
+@admin_required
+@csrf_required
+def delete_port_check(check_id):
+    pc = models.get_port_check(check_id)
+    if not pc:
+        return api_error('Port check not found', 404)
+    models.delete_port_check(check_id)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/port-checks/<int:check_id>/check', methods=['POST'])
+@admin_required
+@csrf_required
+def check_port_manual(check_id):
+    pc = models.get_port_check(check_id)
+    if not pc:
+        return api_error('Port check not found', 404)
+    previous_status = pc.get('status')
+    result = port_checker.check_port(pc)
+    models.save_port_check(check_id, result)
+    settings = models.get_settings()
+    _maybe_send_port_alert(pc, result, settings, previous_status)
+    return jsonify(result)
+
+
+def run_check_for_port(pc):
+    try:
+        result = port_checker.check_port(pc)
+        result['pc_id'] = pc['id']
+        result['name'] = pc['name']
+        result['hostname'] = pc['hostname']
+        result['port'] = pc['port']
+        return result
+    except Exception as e:
+        return {
+            'pc_id': pc['id'], 'name': pc['name'], 'hostname': pc['hostname'],
+            'port': pc['port'], 'status': 'down', 'error': str(e),
+        }
+
+
+def _maybe_send_port_alert(pc, result, settings, previous_status=None):
+    if previous_status is None:
+        return
+    if models.is_in_maintenance_window('port', pc['id']):
+        return
+    new_status = result['status']
+    is_down = new_status in ('down', 'error')
+    was_up = previous_status in ('up',)
+    is_up = new_status in ('up',)
+    was_down = previous_status in ('down', 'error', 'unknown')
+
+    should_alert = False
+    if is_down and was_up and pc.get('notify_on_down'):
+        should_alert = True
+    elif is_up and was_down and pc.get('notify_on_recovery'):
+        should_alert = True
+
+    if not should_alert:
+        return
+
+    settings = settings or models.get_settings()
+    domain_data = dict(pc)
+    try:
+        errors = send_alerts(pc['name'], new_status, None, None, settings, domain_data=domain_data)
+    except Exception as e:
+        errors = [str(e)]
+    try:
+        we = send_webhook_alerts(pc['name'], new_status, None, None, settings, domain_data=domain_data)
+        errors.extend(we)
+    except Exception as e:
+        errors.append(str(e))
+
+    if errors:
+        for e in errors:
+            models.add_log('port_alert_error', f'Port alert failed for {pc["name"]}: {e}')
+    else:
+        models.add_log('port_alert', f'Port alert sent for {pc["name"]}: {new_status}')
+        models.update_port_last_alerted(pc['id'])
+
+
 # ─── Scheduler Status ──────────────────────────────────────────
 @app.route('/api/scheduler/status', methods=['GET'])
 @login_required
@@ -2283,6 +2393,39 @@ def check_dns_background():
         logger.error(f"Scheduled DNS check failed: {e}")
 
 
+def check_port_background():
+    try:
+        with app.app_context():
+            checks = models.get_port_checks()
+            now = models.timezone_now()
+            due = []
+            for pc in checks:
+                if not pc.get('is_active'):
+                    continue
+                interval = pc.get('check_interval', 300)
+                last = models.parse_dt(pc.get('last_checked'))
+                if last and (now - last).total_seconds() < interval:
+                    continue
+                due.append(pc)
+            if not due:
+                return
+            settings = models.get_settings()
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                futures = {pool.submit(run_check_for_port, pc): pc for pc in due}
+                for future in as_completed(futures):
+                    r = future.result()
+                    pc = next((p for p in due if p['id'] == r['pc_id']), None)
+                    if pc:
+                        models.save_port_check(pc['id'], r)
+                        previous_status = pc.get('status')
+                        if not (previous_status == r.get('status') and r.get('status') != 'down'):
+                            models.add_log('port_check', f'Auto check: {pc["name"]} - {r["status"]}')
+                        _maybe_send_port_alert(pc, r, settings, previous_status)
+            models.prune_logs()
+    except Exception as e:
+        logger.error(f"Scheduled port check failed: {e}")
+
+
 # ─── Graceful shutdown ────────────────────────────────────────
 def shutdown(wait=True):
     """Graceful shutdown. Set wait=True to block until in-flight checks complete (atexit),
@@ -2314,7 +2457,7 @@ def main():
     # Scheduler runs here for `python app.py` dev mode.
     # Under gunicorn, it starts in gunicorn.conf.py post_worker_init instead.
     if not os.environ.get("PYTEST_VERSION"):
-        start_scheduler(check_all_background, check_webapps_background, check_dns_background)
+        start_scheduler(check_all_background, check_webapps_background, check_dns_background, check_port_background)
         backup.schedule_backup(sched_mod.scheduler)
         atexit.register(shutdown)
     debug = os.environ.get('FLASK_DEBUG', '0') == '1'

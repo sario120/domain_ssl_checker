@@ -53,6 +53,10 @@
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><circle cx="12" cy="12" r="2"/></svg>
         <span>DNS</span>
       </button>
+      <button class="sidebar-item" data-view="ports" title="Ports">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+        <span>Ports</span>
+      </button>
       <div class="sidebar-group-label">System</div>
       <button class="sidebar-item" data-view="backups" title="Backups">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
@@ -599,6 +603,83 @@
       </div>
     </section>
 
+    <!-- Ports View -->
+    <section id="view-ports" class="view">
+      <div class="view-header">
+        <div>
+          <h2>Port Monitoring</h2>
+          <p class="view-subtitle">Monitor TCP port availability and response times.</p>
+        </div>
+        <div class="header-actions">
+          <input type="text" id="port-search" class="domain-search-input" placeholder="Search ports...">
+          <button class="btn btn-secondary" data-action="toggle-view-ports" title="Switch to table view"><span class="view-toggle-icon">&#9776;</span><span class="view-toggle-label">Table</span></button>
+          <button class="btn btn-secondary" data-action="check-all-ports">&#x21bb; Check All</button>
+          <button class="btn btn-primary" data-action="add-port-check">+ Add Port Check</button>
+        </div>
+      </div>
+      <div class="domain-list-summary" id="port-summary">
+        <span id="port-result">Loading...</span>
+      </div>
+      <div class="domain-filters" id="port-filters">
+        <button class="log-filter active" data-port-filter="all">All <span class="filter-count" id="port-count-all"></span></button>
+        <button class="log-filter" data-port-filter="up">Up <span class="filter-count" id="port-count-up"></span></button>
+        <button class="log-filter" data-port-filter="down">Down <span class="filter-count" id="port-count-down"></span></button>
+        <button class="log-filter" data-port-filter="unknown">Unknown <span class="filter-count" id="port-count-unknown"></span></button>
+      </div>
+      <div class="bulk-toolbar" id="port-bulk-toolbar" style="display:none">
+        <label class="bulk-select-all"><input type="checkbox" id="select-all-ports"> Select All</label>
+        <span id="port-bulk-count">0 selected</span>
+        <button class="btn btn-sm btn-secondary" data-action="port-bulk-check">Check Selected</button>
+        <button class="btn btn-sm btn-danger" data-action="port-bulk-delete">Delete Selected</button>
+        <button class="btn btn-sm btn-secondary" data-action="port-bulk-deselect">Clear</button>
+      </div>
+      <div class="sort-bar" id="sort-bar-ports">
+        <select id="sort-port-select" class="sort-select" data-type="port">
+          <option value="name" data-dir="asc">Name &#9650;</option>
+          <option value="name" data-dir="desc">Name &#9660;</option>
+          <option value="hostname" data-dir="asc">Hostname &#9650;</option>
+          <option value="hostname" data-dir="desc">Hostname &#9660;</option>
+          <option value="port" data-dir="asc">Port &#9650;</option>
+          <option value="port" data-dir="desc">Port &#9660;</option>
+          <option value="status" data-dir="asc">Status &#9650;</option>
+          <option value="status" data-dir="desc">Status &#9660;</option>
+          <option value="response_time" data-dir="asc">Response Time &#9650;</option>
+          <option value="response_time" data-dir="desc">Response Time &#9660;</option>
+          <option value="checked" data-dir="asc">Last Checked &#9650;</option>
+          <option value="checked" data-dir="desc">Last Checked &#9660;</option>
+        </select>
+        <div class="sort-right">
+          <button class="btn btn-sm btn-secondary" data-action="refresh-ports">&#x21bb; Refresh</button>
+        </div>
+      </div>
+      <div id="port-list" class="domain-list"></div>
+      <div class="domain-table-wrapper"><table id="port-table" class="domain-table" style="display:none">
+        <thead><tr><th class="col-checkbox"></th><th class="col-name">Name</th><th class="col-hostname">Hostname</th><th class="col-port">Port</th><th class="col-status">Status</th><th class="col-response">Response Time</th><th class="col-checked">Last Checked</th><th class="col-actions">Actions</th></tr></thead>
+        <tbody id="port-table-body"></tbody>
+      </table></div>
+      <div class="pagination-wrapper" id="pagination-ports" style="display:none">
+        <div class="pagination-info">Showing <span id="page-from-ports">0</span>-<span id="page-to-ports">0</span> of <span id="page-total-ports">0</span></div>
+        <div class="pagination-controls">
+          <button class="btn btn-sm btn-secondary" data-action="page-first-ports" id="page-first-ports">&#171;</button>
+          <button class="btn btn-sm btn-secondary" data-action="page-prev-ports" id="page-prev-ports">&#8249;</button>
+          <select id="page-size-ports" class="page-size-select">
+            <option value="25">25/page</option>
+            <option value="50">50/page</option>
+            <option value="100">100/page</option>
+          </select>
+          <button class="btn btn-sm btn-secondary" data-action="page-next-ports" id="page-next-ports">&#8250;</button>
+          <button class="btn btn-sm btn-secondary" data-action="page-last-ports" id="page-last-ports">&#187;</button>
+        </div>
+      </div>
+      <div class="empty-state" id="port-empty" style="display:none">
+        <h3>No port checks configured</h3>
+        <p>Add TCP ports to monitor availability and response times.</p>
+        <div class="empty-actions">
+          <button class="btn btn-primary" data-action="add-port-check">+ Add Your First Port Check</button>
+        </div>
+      </div>
+    </section>
+
     <!-- DNS Modal -->
     <div id="dns-modal" class="modal">
       <div class="modal-backdrop" data-action="close-dns-modal"></div>
@@ -655,6 +736,67 @@
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-action="close-dns-modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Ports Modal -->
+    <div id="port-modal" class="modal">
+      <div class="modal-backdrop" data-action="close-port-modal"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="port-modal-title">Add Port Check</h3>
+          <button class="modal-close" data-action="close-port-modal">&times;</button>
+        </div>
+        <form id="port-form">
+          <input type="hidden" id="port-id">
+          <div class="form-row">
+            <label for="port-name">Name</label>
+            <input type="text" id="port-name" placeholder="My Port Check" required>
+          </div>
+          <div class="form-row">
+            <label for="port-hostname">Hostname</label>
+            <input type="text" id="port-hostname" placeholder="example.com" required>
+          </div>
+          <div class="form-row">
+            <label for="port-port">Port</label>
+            <input type="number" id="port-port" placeholder="443" min="1" max="65535" required>
+          </div>
+          <div class="form-row">
+            <label for="port-check-interval">Check Interval</label>
+            <select id="port-check-interval">
+              <option value="60">1 minute</option>
+              <option value="300" selected>5 minutes</option>
+              <option value="900">15 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="3600">1 hour</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label for="port-timeout">Timeout (seconds)</label>
+            <input type="number" id="port-timeout" value="10" min="1" max="120">
+          </div>
+          <div class="form-row form-checkbox-row">
+            <label><input type="checkbox" id="port-use-ipv6"> Use IPv6</label>
+          </div>
+          <div class="form-row">
+            <label for="port-notes">Notes (optional)</label>
+            <input type="text" id="port-notes" placeholder="Purpose of this check">
+          </div>
+          <div class="form-row">
+            <label for="port-tags">Tags (comma separated)</label>
+            <input type="text" id="port-tags" placeholder="production, critical">
+          </div>
+          <div class="form-row form-checkbox-row">
+            <label><input type="checkbox" id="port-notify-down" checked> Notify on down</label>
+          </div>
+          <div class="form-row form-checkbox-row">
+            <label><input type="checkbox" id="port-notify-recovery" checked> Notify on recovery</label>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-action="close-port-modal">Cancel</button>
             <button type="submit" class="btn btn-primary">Save</button>
           </div>
         </form>

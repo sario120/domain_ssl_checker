@@ -76,6 +76,7 @@ function activateView(viewName) {
   if (viewName === 'sslcerts') loadDomains('ssl_only', true);
   if (viewName === 'webapps') { loadWebappViewPrefs(); loadWebApps(true); }
   if (viewName === 'dns') loadDnsChecks();
+  if (viewName === 'ports') loadPortChecks();
 }
 
 document.querySelectorAll('.sidebar-item').forEach(tab => {
@@ -296,6 +297,29 @@ document.addEventListener('click', (e) => {
   else if (action === 'check-all-dns') { checkAllDns(); }
   else if (action === 'toggle-view-dns') { toggleDnsView(); }
   else if (action === 'set-dns-filter') { _dnsFilter = btn.dataset.dnsFilter; loadDnsChecks(); }
+  else if (action === 'add-port-check') { openPortModal(null); }
+  else if (action === 'close-port-modal') { closePortModal(); }
+  else if (action === 'edit-port-check') { var portId = parseInt(btn.dataset.id); var pc = _portCache && _portCache.find(function(p) { return p.id === portId; }); if (pc) openPortModal(pc); }
+  else if (action === 'delete-port-check') { var portId = parseInt(btn.dataset.id); if (!confirm('Delete this port check?')) return; api('DELETE', '/api/port-checks/' + portId).then(function() { toast('Port check deleted'); loadPortChecks(); }).catch(function(err) { toast(err.message, 'error'); }); }
+  else if (action === 'check-port') { var portId = parseInt(btn.dataset.id); checkSinglePort(portId); }
+  else if (action === 'check-all-ports') { checkAllPorts(); }
+  else if (action === 'toggle-view-ports') { togglePortView(); }
+  else if (action === 'set-port-filter') { _portFilter = btn.dataset.portFilter; loadPortChecks(); }
+  else if (action === 'refresh-ports') { loadPortChecks(); }
+  else if (action === 'port-bulk-check') {
+    var ids = Array.from(_selectedPorts);
+    if (!ids.length) { toast('No ports selected', 'error'); return; }
+    var promises = ids.map(function (id) { return api('POST', '/api/port-checks/' + id + '/check').catch(function () {}); });
+    Promise.all(promises).then(function () { toast('Port checks completed'); loadPortChecks(); });
+  }
+  else if (action === 'port-bulk-delete') {
+    var ids = Array.from(_selectedPorts);
+    if (!ids.length) { toast('No ports selected', 'error'); return; }
+    if (!confirm('Delete ' + ids.length + ' port check' + (ids.length !== 1 ? 's' : '') + '?')) return;
+    var promises = ids.map(function (id) { return api('DELETE', '/api/port-checks/' + id).catch(function () {}); });
+    Promise.all(promises).then(function () { toast('Port checks deleted'); _selectedPorts.clear(); loadPortChecks(); });
+  }
+  else if (action === 'port-bulk-deselect') { _selectedPorts.clear(); updatePortBulkBar(); loadPortChecks(); }
   else if (action === 'toggle-view-webapps') {
     _webappViewMode = _webappViewMode === 'table' ? 'cards' : 'table';
     var label = btn.querySelector('.view-toggle-label');
@@ -811,6 +835,14 @@ document.getElementById('dns-filters').addEventListener('click', (e) => {
   _dnsFilter = btn.dataset.dnsFilter;
   loadDnsChecks();
 });
+document.getElementById('port-filters').addEventListener('click', (e) => {
+  var btn = e.target.closest('[data-port-filter]');
+  if (!btn) return;
+  document.querySelectorAll('#port-filters .log-filter').forEach(function (b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  _portFilter = btn.dataset.portFilter;
+  loadPortChecks();
+});
 document.getElementById('sort-webapp-select').addEventListener('change', (e) => {
   var opt = e.target.options[e.target.selectedIndex];
   _webappSort.key = opt.value;
@@ -942,6 +974,90 @@ document.getElementById('dns-form').addEventListener('submit', async (e) => {
     loadDnsChecks();
     toast(id ? 'DNS check updated' : 'DNS check added');
   } catch (e) { toast(e.message, 'error'); }
+});
+
+// ─── Port form submit ──────────────────────────────────────────────
+document.getElementById('port-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  var id = document.getElementById('port-id').value;
+  var data = {
+    name: document.getElementById('port-name').value.trim(),
+    hostname: document.getElementById('port-hostname').value.trim(),
+    port: parseInt(document.getElementById('port-port').value) || 443,
+    check_interval: parseInt(document.getElementById('port-check-interval').value) || 300,
+    timeout: parseInt(document.getElementById('port-timeout').value) || 10,
+    use_ipv6: document.getElementById('port-use-ipv6').checked,
+    notes: document.getElementById('port-notes').value.trim(),
+    tags: document.getElementById('port-tags').value.trim(),
+    notify_on_down: document.getElementById('port-notify-down').checked,
+    notify_on_recovery: document.getElementById('port-notify-recovery').checked,
+  };
+  if (!data.name || !data.hostname || !data.port) { toast('Name, hostname, and port are required', 'error'); return; }
+  try {
+    if (id) {
+      await api('PUT', '/api/port-checks/' + id, data);
+    } else {
+      await api('POST', '/api/port-checks', data);
+    }
+    closePortModal();
+    loadPortChecks();
+    toast(id ? 'Port check updated' : 'Port check added');
+  } catch (e) { toast(e.message, 'error'); }
+});
+
+// ─── Port sort / pagination ───────────────────────────────────────
+document.getElementById('sort-port-select').addEventListener('change', (e) => {
+  var opt = e.target.options[e.target.selectedIndex];
+  _portSort.key = opt.value;
+  _portSort.dir = parseInt(opt.dataset.dir) || 1;
+  _portPagination.page = 1;
+  applyPortFilters(_portCache || []);
+});
+document.getElementById('pagination-ports').addEventListener('click', (e) => {
+  var btn = e.target.closest('[data-action^="page-"]');
+  if (!btn) return;
+  var action = btn.dataset.action;
+  if (action === 'page-first-ports') _portPagination.page = 1;
+  else if (action === 'page-prev-ports') _portPagination.page = Math.max(1, _portPagination.page - 1);
+  else if (action === 'page-next-ports') _portPagination.page = _portPagination.page + 1;
+  else if (action === 'page-last-ports') _portPagination.page = 9999;
+  applyPortFilters(_portCache || []);
+});
+document.getElementById('page-size-ports').addEventListener('change', (e) => {
+  _portPagination.size = parseInt(e.target.value) || 25;
+  _portPagination.page = 1;
+  applyPortFilters(_portCache || []);
+});
+document.getElementById('port-search').addEventListener('input', (e) => {
+  _portSearch = e.target.value.trim().toLowerCase();
+  _portPagination.page = 1;
+  loadPortChecks();
+});
+
+// ─── Port select-all / bulk ───────────────────────────────────────
+var _lastCheckedPort = null;
+document.addEventListener('change', (e) => {
+  var cb = e.target.closest('.port-select');
+  if (!cb) return;
+  var id = parseInt(cb.value);
+  if (cb.checked) _selectedPorts.add(id);
+  else _selectedPorts.delete(id);
+  if (e.shiftKey && _lastCheckedPort !== null) {
+    var allIds = (_portCache || []).map(function (a) { return a.id; });
+    var lastIdx = allIds.indexOf(_lastCheckedPort);
+    var curIdx = allIds.indexOf(id);
+    if (lastIdx !== -1 && curIdx !== -1) {
+      var start = lastIdx < curIdx ? lastIdx : curIdx;
+      var end = lastIdx < curIdx ? curIdx : lastIdx;
+      for (var i = start; i <= end; i++) {
+        var sid = allIds[i];
+        var sib = document.querySelector('.port-select[value="' + sid + '"]');
+        if (sib) { sib.checked = true; _selectedPorts.add(sid); }
+      }
+    }
+  }
+  _lastCheckedPort = cb.checked ? id : null;
+  updatePortBulkBar();
 });
 
 // ─── Column visibility ─────────────────────────────────────────
@@ -1668,6 +1784,15 @@ let _webappCollapsedGroups = new Set();
 let _dnsCache = null;
 let _dnsFilter = 'all';
 let _dnsViewMode = 'cards';
+
+// ─── Port Checks ───────────────────────────────────────────────────
+let _portCache = null;
+let _portFilter = 'all';
+let _portViewMode = 'cards';
+let _portSearch = '';
+let _portSort = { key: 'name', dir: 1 };
+let _portPagination = { page: 1, size: 25 };
+let _selectedPorts = new Set();
 
 function saveWebappViewPrefs() {
   var prefs = {
@@ -2480,6 +2605,221 @@ function toggleDnsView() {
   document.querySelector('#view-dns .view-toggle-icon').innerHTML = _dnsViewMode === 'cards' ? '&#9776;' : '&#9635;';
   loadDnsChecks();
 }
+
+// ─── Port Checks ───────────────────────────────────────────────────
+function loadPortChecks() {
+  api('GET', '/api/port-checks').then(function (checks) {
+    _portCache = checks || [];
+    applyPortFilters(_portCache);
+  }).catch(function (err) {
+    toast(err.message, 'error');
+  });
+}
+
+function applyPortFilters(checks) {
+  var filtered = checks.slice();
+
+  if (_portFilter !== 'all') {
+    filtered = filtered.filter(function (c) { return c.status === _portFilter; });
+  }
+
+  if (_portSearch) {
+    filtered = filtered.filter(function (c) {
+      return (c.name && c.name.toLowerCase().indexOf(_portSearch) !== -1) ||
+             (c.hostname && c.hostname.toLowerCase().indexOf(_portSearch) !== -1) ||
+             (String(c.port) === _portSearch);
+    });
+  }
+
+  var totalFiltered = filtered.length;
+
+  filtered.sort(function (a, b) {
+    var ak = a[_portSort.key];
+    var bk = b[_portSort.key];
+    if (typeof ak === 'string') ak = ak.toLowerCase();
+    if (typeof bk === 'string') bk = bk.toLowerCase();
+    if (ak == null) ak = '';
+    if (bk == null) bk = '';
+    if (ak < bk) return -1 * _portSort.dir;
+    if (ak > bk) return 1 * _portSort.dir;
+    return 0;
+  });
+
+  var total = filtered.length;
+  var page = _portPagination.page;
+  var size = _portPagination.size;
+  var start = (page - 1) * size;
+  var end = Math.min(start + size, total);
+  var pageItems = filtered.slice(start, end);
+
+  document.getElementById('port-count-all').textContent = checks.length;
+  document.getElementById('port-count-up').textContent = checks.filter(function (c) { return c.status === 'up'; }).length;
+  document.getElementById('port-count-down').textContent = checks.filter(function (c) { return c.status === 'down'; }).length;
+  document.getElementById('port-count-unknown').textContent = checks.filter(function (c) { return c.status !== 'up' && c.status !== 'down'; }).length;
+  document.getElementById('port-result').textContent = 'Showing ' + totalFiltered + ' port check' + (totalFiltered !== 1 ? 's' : '');
+  if (!totalFiltered) {
+    document.getElementById('port-list').innerHTML = '';
+    document.getElementById('port-table').style.display = 'none';
+    document.getElementById('port-empty').style.display = checks.length ? '' : 'none';
+    document.getElementById('pagination-ports').style.display = 'none';
+    return;
+  }
+  document.getElementById('port-empty').style.display = 'none';
+  if (_portViewMode === 'cards') {
+    renderPortCards(pageItems);
+    document.getElementById('port-table').style.display = 'none';
+  } else {
+    renderPortTable(pageItems);
+    document.getElementById('port-table').style.display = '';
+  }
+  renderPortPagination(total);
+}
+
+function renderPortCards(checks) {
+  var html = '<div class="domain-cards">';
+  checks.forEach(function (c) {
+    var statusClass = c.status === 'up' ? 'status-up' : c.status === 'down' ? 'status-down' : 'status-unknown';
+    var statusLabel = c.status === 'up' ? 'Up' : c.status === 'down' ? 'Down' : 'Unknown';
+    var respTime = c.response_time != null ? c.response_time + 'ms' : 'N/A';
+    var lastChecked = c.last_checked ? relativeTime(c.last_checked) : 'Never';
+    html += '<div class="domain-card">';
+    html += '<div class="card-main">';
+    html += '<div class="card-info">';
+    html += '<label class="bulk-check"><input type="checkbox" class="port-select" value="' + c.id + '"' + (_selectedPorts.has(c.id) ? ' checked' : '') + '></label>';
+    html += '<strong class="card-name">' + esc(c.name) + '</strong>';
+    html += '<span class="card-url">' + esc(c.hostname) + ':' + c.port + '</span>';
+    html += '</div>';
+    html += '<div class="card-status">';
+    html += '<span class="badge ' + statusClass + '">' + statusLabel + '</span>';
+    html += '</div>';
+    html += '<div class="card-metrics">';
+    html += '<span class="metric"><span class="metric-label">Response</span><span class="metric-value">' + respTime + '</span></span>';
+    html += '</div>';
+    html += '</div>';
+    html += '<div class="card-footer">';
+    html += '<span class="card-time">' + lastChecked + '</span>';
+    html += '<div class="card-actions">';
+    html += '<button class="btn btn-sm btn-secondary" data-action="check-port" data-id="' + c.id + '">&#x21bb;</button>';
+    html += '<div class="kebab" data-kebab-for="port-' + c.id + '"><button class="btn btn-sm btn-secondary" data-action="toggle-kebab" data-kebab="port-' + c.id + '">&#8942;</button><div class="kebab-menu" id="kebab-port-' + c.id + '" tabindex="-1"><button data-action="edit-port-check" data-id="' + c.id + '">Edit</button><button data-action="delete-port-check" data-id="' + c.id + '">Delete</button></div></div>';
+    html += '</div>';
+    html += '</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+  document.getElementById('port-list').innerHTML = html;
+}
+
+function renderPortTable(checks) {
+  var tbody = document.getElementById('port-table-body');
+  var html = '';
+  checks.forEach(function (c) {
+    var statusClass = c.status === 'up' ? 'status-up' : c.status === 'down' ? 'status-down' : 'status-unknown';
+    var statusLabel = c.status === 'up' ? 'Up' : c.status === 'down' ? 'Down' : 'Unknown';
+    var respTime = c.response_time != null ? c.response_time + 'ms' : 'N/A';
+    var lastChecked = c.last_checked ? relativeTime(c.last_checked) : 'Never';
+    html += '<tr>';
+    html += '<td class="col-checkbox"><input type="checkbox" class="port-select" value="' + c.id + '"' + (_selectedPorts.has(c.id) ? ' checked' : '') + '></td>';
+    html += '<td class="col-name">' + esc(c.name) + '</td>';
+    html += '<td class="col-hostname">' + esc(c.hostname) + '</td>';
+    html += '<td class="col-port">' + c.port + '</td>';
+    html += '<td class="col-status"><span class="badge ' + statusClass + '">' + statusLabel + '</span></td>';
+    html += '<td class="col-response">' + respTime + '</td>';
+    html += '<td class="col-checked">' + lastChecked + '</td>';
+    html += '<td class="col-actions"><button class="btn btn-sm btn-secondary" data-action="check-port" data-id="' + c.id + '">&#x21bb;</button> <div class="kebab" data-kebab-for="port-t-' + c.id + '"><button class="btn btn-sm btn-secondary" data-action="toggle-kebab" data-kebab="port-t-' + c.id + '">&#8942;</button><div class="kebab-menu" id="kebab-port-t-' + c.id + '" tabindex="-1"><button data-action="edit-port-check" data-id="' + c.id + '">Edit</button><button data-action="delete-port-check" data-id="' + c.id + '">Delete</button></div></div></td>';
+    html += '</tr>';
+  });
+  tbody.innerHTML = html;
+}
+
+function renderPortPagination(total) {
+  var page = _portPagination.page;
+  var size = _portPagination.size;
+  var totalPages = Math.ceil(total / size);
+  var start = (page - 1) * size + 1;
+  var end = Math.min(page * size, total);
+  document.getElementById('page-from-ports').textContent = total ? start : 0;
+  document.getElementById('page-to-ports').textContent = end;
+  document.getElementById('page-total-ports').textContent = total;
+  document.getElementById('pagination-ports').style.display = total > size ? '' : 'none';
+  document.getElementById('page-first-ports').disabled = page <= 1;
+  document.getElementById('page-prev-ports').disabled = page <= 1;
+  document.getElementById('page-next-ports').disabled = page >= totalPages;
+  document.getElementById('page-last-ports').disabled = page >= totalPages;
+  updatePortBulkBar();
+}
+
+function openPortModal(check) {
+  document.getElementById('port-id').value = check ? check.id : '';
+  document.getElementById('port-modal-title').textContent = check ? 'Edit Port Check' : 'Add Port Check';
+  document.getElementById('port-name').value = check ? check.name : '';
+  document.getElementById('port-hostname').value = check ? check.hostname : '';
+  document.getElementById('port-port').value = check ? check.port : '443';
+  document.getElementById('port-check-interval').value = check && check.check_interval ? String(check.check_interval) : '300';
+  document.getElementById('port-timeout').value = check && check.timeout ? String(check.timeout) : '10';
+  document.getElementById('port-use-ipv6').checked = check ? !!check.use_ipv6 : false;
+  document.getElementById('port-notes').value = check && check.notes ? check.notes : '';
+  document.getElementById('port-tags').value = check && check.tags ? check.tags : '';
+  document.getElementById('port-notify-down').checked = check ? check.notify_on_down !== false : true;
+  document.getElementById('port-notify-recovery').checked = check ? check.notify_on_recovery !== false : true;
+  document.getElementById('port-modal').classList.add('visible');
+}
+
+function closePortModal() {
+  document.getElementById('port-modal').classList.remove('visible');
+}
+
+function checkSinglePort(id) {
+  api('POST', '/api/port-checks/' + id + '/check').then(function () {
+    toast('Port check completed');
+    loadPortChecks();
+  }).catch(function (err) {
+    toast(err.message, 'error');
+  });
+}
+
+function checkAllPorts() {
+  var checks = _portCache || [];
+  if (!checks.length) return;
+  var promises = checks.map(function (c) {
+    return api('POST', '/api/port-checks/' + c.id + '/check').catch(function () {});
+  });
+  Promise.all(promises).then(function () {
+    toast('All port checks completed');
+    loadPortChecks();
+  });
+}
+
+function togglePortView() {
+  _portViewMode = _portViewMode === 'cards' ? 'table' : 'cards';
+  document.querySelector('#view-ports .view-toggle-label').textContent = _portViewMode === 'cards' ? 'Table' : 'Cards';
+  document.querySelector('#view-ports .view-toggle-icon').innerHTML = _portViewMode === 'cards' ? '&#9776;' : '&#9635;';
+  loadPortChecks();
+}
+
+function updatePortBulkBar() {
+  var count = _selectedPorts.size;
+  var bar = document.getElementById('port-bulk-toolbar');
+  if (!bar) return;
+  if (count) {
+    bar.style.display = '';
+    document.getElementById('port-bulk-count').textContent = count + ' selected';
+  } else {
+    bar.style.display = 'none';
+  }
+  var selectAll = document.getElementById('select-all-ports');
+  if (selectAll) selectAll.checked = (_portCache || []).length > 0 && _selectedPorts.size === (_portCache || []).length;
+}
+
+// Select all checkbox for ports
+document.getElementById('select-all-ports').addEventListener('change', function (e) {
+  var checked = e.target.checked;
+  (_portCache || []).forEach(function (c) {
+    if (checked) _selectedPorts.add(c.id);
+    else _selectedPorts.delete(c.id);
+  });
+  updatePortBulkBar();
+  applyPortFilters(_portCache || []);
+});
 
 // ─── setHealth ─────────────────────────────────────────────────────
 function setHealth(prefix, pct) {

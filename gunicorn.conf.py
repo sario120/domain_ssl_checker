@@ -24,9 +24,9 @@ def post_worker_init(worker):
     if os.environ.get("PYTEST_VERSION"):
         return
     worker.log.info("Starting scheduler (gunicorn worker %s)", worker.pid)
-    from app import check_all_background, check_webapps_background
+    from app import check_all_background, check_webapps_background, check_dns_background, check_port_background
     from scheduler import start_scheduler
     import backup
     import scheduler as sched_mod
-    start_scheduler(check_all_background, check_webapps_background)
+    start_scheduler(check_all_background, check_webapps_background, check_dns_background, check_port_background)
     backup.schedule_backup(sched_mod.scheduler)
