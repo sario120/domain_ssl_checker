@@ -31,6 +31,7 @@ import email_templates
 import scheduler as sched_mod
 from checker import check_domain
 import webapp_checker
+import ct_monitor
 import dns_checker
 import port_checker
 from alert import send_alerts, test_smtp, send_check_complete_summary, send_invite_email, _resolve_smtp_config
@@ -515,7 +516,8 @@ def update_domain_route(domain_id):
                          domain_type=data.get('type'),
                          notes=data.get('notes'),
                          manual_expiry_date=data.get('manual_expiry_date'),
-                         manual_registrar=data.get('manual_registrar'))
+                         manual_registrar=data.get('manual_registrar'),
+                         ct_monitoring_enabled=data.get('ct_monitoring_enabled'))
     models.add_log('info', f'Domain updated: {domain["url"]}', username=current_username())
     return jsonify({'message': 'Domain updated'})
 
@@ -758,9 +760,46 @@ def _run_full_check(trigger):
         models.add_logs_batch(log_entries)
         models.update_check_run(run_id, len(results), 'completed')
         models.save_health_snapshot()
+
+        try:
+            _run_ct_checks(domains)
+        except Exception as e:
+            logger.warning("CT log checks failed: %s", e)
+
         return {'domains': domains, 'results': results, 'run_id': run_id}
     finally:
         _release_check_run()
+
+
+def _run_ct_checks(domains):
+    for d in domains:
+        if not d.get('ct_monitoring_enabled'):
+            continue
+        hostname = d.get('url', '')
+        hostname = re.sub(r'^https?://', '', hostname).split('/')[0].split(':')[0]
+        result = ct_monitor.check_ct_logs(hostname, d.get('ct_last_known_ids'))
+        if result.get('error'):
+            models.add_log('ct_check_error', f'CT check failed for {hostname}: {result["error"]}', domain_id=d['id'])
+            continue
+        models.update_domain(d['id'],
+            ct_last_known_ids=json.dumps(result['current_ids']),
+            ct_last_checked=models.timezone_now_str())
+        if result['count'] > 0:
+            for cert in result['new_certs']:
+                models.add_log('ct_alert',
+                    f'New cert issued for {hostname}: issuer={cert["issuer_name"]}, serial={cert["serial_number"]}, not_before={cert["not_before"]}',
+                    domain_id=d['id'])
+            settings = models.get_settings()
+            try:
+                send_alerts(d['name'] if d.get('name') else hostname, 'ct_new_cert',
+                    None, None, settings, domain_data=d)
+            except Exception:
+                pass
+            try:
+                send_webhook_alerts(d['name'] if d.get('name') else hostname, 'ct_new_cert',
+                    None, None, settings, domain_data=d)
+            except Exception:
+                pass
 
 
 @app.route('/api/check-all', methods=['POST'])

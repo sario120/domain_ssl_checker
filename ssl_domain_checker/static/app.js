@@ -3817,6 +3817,7 @@ function openAddModal(type, prefillUrl) {
   document.getElementById('domain-interval').value = 360;
   document.getElementById('domain-manual-expiry').value = '';
   document.getElementById('domain-manual-registrar').value = '';
+  document.getElementById('domain-ct-enabled').checked = true;
   document.getElementById('domain-url').value = prefillUrl || '';
   document.getElementById('domain-modal').classList.add('open');
   document.getElementById('domain-url').focus();
@@ -3837,6 +3838,7 @@ async function openEditModal(id) {
     document.getElementById('domain-notes').value = d.notes || '';
     document.getElementById('domain-manual-expiry').value = d.manual_expiry_date || '';
     document.getElementById('domain-manual-registrar').value = d.manual_registrar || '';
+    document.getElementById('domain-ct-enabled').checked = d.ct_monitoring_enabled !== false;
     document.getElementById('domain-modal').classList.add('open');
   } catch (e) {
     toast(e.message, 'error');
@@ -3857,11 +3859,12 @@ document.getElementById('domain-form').addEventListener('submit', async (e) => {
   const domainType = document.getElementById('domain-type-input').value || 'full';
   const manualExpiry = document.getElementById('domain-manual-expiry').value || '';
   const manualRegistrar = document.getElementById('domain-manual-registrar').value.trim() || '';
+  const ctEnabled = document.getElementById('domain-ct-enabled').checked;
 
   setLoading(btn, true);
   try {
     if (id) {
-      await api('PUT', `/api/domains/${id}`, { url, check_interval: interval, notes, type: domainType, manual_expiry_date: manualExpiry, manual_registrar: manualRegistrar });
+      await api('PUT', `/api/domains/${id}`, { url, check_interval: interval, notes, type: domainType, manual_expiry_date: manualExpiry, manual_registrar: manualRegistrar, ct_monitoring_enabled: ctEnabled });
       toast('Domain updated');
     } else {
       await api('POST', '/api/domains', { url, type: domainType, check_interval: interval, notes, manual_expiry_date: manualExpiry, manual_registrar: manualRegistrar });

@@ -412,6 +412,7 @@ _MIGRATION_DOMAIN_COLS = frozenset({
     'ssl_alert_threshold', 'domain_alert_threshold', 'notes', 'manual_expiry_date',
     'check_interval', 'manual_registrar', 'last_alerted', 'tags', 'ssl_fingerprint',
     'ssl_tls_version', 'ssl_cipher', 'ssl_serial',
+    'ct_monitoring_enabled', 'ct_last_known_ids', 'ct_last_checked',
 })
 _MIGRATION_SETTINGS_COLS = frozenset({
     'last_summary_sent', 'slack_webhook_url', 'slack_enabled',
@@ -444,6 +445,9 @@ def _run_postgres_migrations():
         ('domain_alert_threshold', 'INTEGER', None),
         ('notes', 'TEXT', None),
         ('last_alerted', 'TIMESTAMPTZ', None),
+        ('ct_monitoring_enabled', 'BOOLEAN', 'FALSE'),
+        ('ct_last_known_ids', 'TEXT', None),
+        ('ct_last_checked', 'TIMESTAMPTZ', None),
     ]:
         if col not in db.table_columns('domains'):
             if col not in _MIGRATION_DOMAIN_COLS:
@@ -597,7 +601,10 @@ def add_domain(url, domain_type="full", notes="", manual_expiry_date=None, manua
         return {"ok": False, "error": "Internal error"}
 
 
-_ALLOWED_DOMAIN_COLS = frozenset({'url', 'type', 'notes', 'manual_expiry_date', 'manual_registrar'})
+_ALLOWED_DOMAIN_COLS = frozenset({
+    'url', 'type', 'notes', 'manual_expiry_date', 'manual_registrar',
+    'ct_monitoring_enabled', 'ct_last_known_ids', 'ct_last_checked',
+})
 _ALLOWED_SETTINGS_COLS = frozenset({
     'smtp_server', 'smtp_port', 'smtp_email', 'smtp_password', 'smtp_enabled',
     'ssl_alert_threshold', 'domain_alert_threshold', 'alert_emails',
@@ -613,7 +620,7 @@ _BOOLEAN_SETTINGS_COLS = frozenset({'smtp_enabled', 'slack_enabled', 'zulip_enab
                                      'discord_enabled', 'telegram_enabled', 'teams_enabled'})
 
 
-def update_domain(domain_id, url=None, domain_type=None, notes=None, manual_expiry_date=None, manual_registrar=None):
+def update_domain(domain_id, url=None, domain_type=None, notes=None, manual_expiry_date=None, manual_registrar=None, ct_monitoring_enabled=None):
     conn = get_db()
     fields = {}
     if url is not None: fields["url"] = url
@@ -621,6 +628,7 @@ def update_domain(domain_id, url=None, domain_type=None, notes=None, manual_expi
     if notes is not None: fields["notes"] = notes
     if manual_expiry_date is not None: fields["manual_expiry_date"] = manual_expiry_date
     if manual_registrar is not None: fields["manual_registrar"] = manual_registrar
+    if ct_monitoring_enabled is not None: fields["ct_monitoring_enabled"] = bool(ct_monitoring_enabled)
     fields = {k: v for k, v in fields.items() if k in _ALLOWED_DOMAIN_COLS}
     if fields:
         fields["id"] = domain_id
