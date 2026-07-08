@@ -31,7 +31,7 @@ class TestWebhookAlerts:
         assert "Slack" in errors[0]
 
     def test_zulip_webhook_success(self):
-        settings = {"zulip_webhook_url": "https://zulip.example.com/webhook", "zulip_enabled": True}
+        settings = {"zulip_webhook_url": "https://zulip.example.com/api/v1/messages?email=bot@test.com&api_key=test&stream=test-stream&topic=test", "zulip_enabled": True}
         with patch("webhook.requests.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -40,7 +40,7 @@ class TestWebhookAlerts:
         assert errors == []
 
     def test_zulip_webhook_http_error(self):
-        settings = {"zulip_webhook_url": "https://zulip.example.com/webhook", "zulip_enabled": True}
+        settings = {"zulip_webhook_url": "https://zulip.example.com/api/v1/messages?email=bot@test.com&api_key=test&stream=test-stream&topic=test", "zulip_enabled": True}
         with patch("webhook.requests.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 500
@@ -52,7 +52,7 @@ class TestWebhookAlerts:
     def test_both_webhooks(self):
         settings = {
             "slack_webhook_url": "https://hooks.slack.com/test",
-            "zulip_webhook_url": "https://zulip.example.com/webhook",
+            "zulip_webhook_url": "https://zulip.example.com/api/v1/messages?email=bot@test.com&api_key=test&stream=test-stream&topic=test",
             "slack_enabled": True,
             "zulip_enabled": True,
         }

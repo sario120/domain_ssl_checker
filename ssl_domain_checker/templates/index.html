@@ -676,8 +676,8 @@
             <legend>Zulip</legend>
             <div class="form-row">
               <label for="zulip_webhook_url">Zulip Incoming Webhook URL</label>
-              <input type="url" id="zulip_webhook_url" placeholder="https://yourzulip.zulipchat.com/api/v1/external/webhook?api_key=xxx&stream=ssl-alerts">
-              <span class="field-hint">Create at Zulip Settings → Personal → Bots → Incoming webhook</span>
+              <input type="url" id="zulip_webhook_url" placeholder="https://zulip.company.com/api/v1/messages?api_key=xxx&amp;stream=STREAM&amp;topic=TOPIC">
+              <span class="field-hint">Use Zulip REST API URL with api_key, stream, topic as query params</span>
             </div>
             <div class="form-row checkbox-row">
               <label><input type="checkbox" id="zulip_enabled"> Enable Zulip alerts</label>

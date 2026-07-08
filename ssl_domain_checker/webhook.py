@@ -1,6 +1,6 @@
 import ipaddress
 import logging
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 import requests
 
@@ -91,11 +91,29 @@ def send_test_webhook(webhook_type, webhook_url):
             {"type": "header", "text": {"type": "plain_text", "text": "✅ Vigil Test Notification"}},
             {"type": "section", "text": {"type": "mrkdwn", "text": "This is a test from Vigil SSL Checker.\nIf you see this, your Slack webhook is configured correctly."}},
         ]}
+        resp = requests.post(webhook_url, json=payload, timeout=10, verify=True)
     elif webhook_type == 'zulip':
-        payload = {"content": "**✅ Vigil Test Notification**\n\nThis is a test from Vigil SSL Checker. If you see this, your Zulip webhook is configured correctly."}
+        parsed = urlparse(webhook_url)
+        qs = parse_qs(parsed.query)
+        email = (qs.get('email') or [''])[0]
+        api_key = (qs.get('api_key') or [''])[0]
+        stream = (qs.get('stream') or [''])[0]
+        topic = (qs.get('topic') or ['Vigil Alerts'])[0]
+        if not email:
+            raise ValueError("Zulip email missing in webhook URL")
+        if not api_key:
+            raise ValueError("Zulip API key missing in webhook URL")
+        if not stream:
+            raise ValueError("Zulip stream missing in webhook URL")
+        base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        resp = requests.post(base_url, auth=(email, api_key), data={
+            "type": "stream",
+            "to": stream,
+            "topic": topic,
+            "content": "**✅ Vigil Test Notification**\n\nThis is a test from Vigil SSL Checker. If you see this, your Zulip webhook is configured correctly.",
+        }, timeout=10, verify=True)
     else:
         raise ValueError(f"Unknown webhook type: {webhook_type}")
-    resp = requests.post(webhook_url, json=payload, timeout=10, verify=True)
     if resp.status_code not in (200, 204):
         raise Exception(f"HTTP {resp.status_code}")
 
@@ -103,6 +121,19 @@ def send_test_webhook(webhook_type, webhook_url):
 def _send_zulip(webhook_url, domain_name, status, ssl_days_left, domain_days_left, domain_data=None):
     if not validate_webhook_url(webhook_url):
         raise ValueError("Blocked: unsafe webhook URL")
+    parsed = urlparse(webhook_url)
+    qs = parse_qs(parsed.query)
+    email = (qs.get('email') or [''])[0]
+    api_key = (qs.get('api_key') or [''])[0]
+    stream = (qs.get('stream') or [''])[0]
+    topic = (qs.get('topic') or ['Vigil Alerts'])[0]
+    if not email:
+        raise ValueError("Zulip email missing in webhook URL")
+    if not api_key:
+        raise ValueError("Zulip API key missing in webhook URL")
+    if not stream:
+        raise ValueError("Zulip stream missing in webhook URL")
+    base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
     ssl_line = f"SSL Days Left: {ssl_days_left}\n" if ssl_days_left is not None else ""
     domain_line = f"Domain Days Left: {domain_days_left}\n" if domain_days_left is not None else ""
     content = (
@@ -110,6 +141,11 @@ def _send_zulip(webhook_url, domain_name, status, ssl_days_left, domain_days_lef
         f"Status: {status}\n"
         f"{ssl_line}{domain_line}"
     )
-    resp = requests.post(webhook_url, json={"content": content}, timeout=10, verify=True)
-    if resp.status_code not in (200, 204):
+    resp = requests.post(base_url, auth=(email, api_key), data={
+        "type": "stream",
+        "to": stream,
+        "topic": topic,
+        "content": content,
+    }, timeout=10, verify=True)
+    if resp.status_code != 200:
         raise Exception(f"HTTP {resp.status_code}")
