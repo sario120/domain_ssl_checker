@@ -31,6 +31,7 @@ import email_templates
 import scheduler as sched_mod
 from checker import check_domain
 import webapp_checker
+import dns_checker
 from alert import send_alerts, test_smtp, send_check_complete_summary, send_invite_email, _resolve_smtp_config
 from webhook import send_webhook_alerts, validate_webhook_url
 from scheduler import start_scheduler, get_next_scheduled_check
@@ -1271,6 +1272,120 @@ def delete_maintenance_window(mw_id):
     return jsonify({'ok': True})
 
 
+# ─── DNS Checks ────────────────────────────────────────────────────
+@app.route('/api/dns-checks', methods=['GET'])
+@login_required
+def list_dns_checks():
+    return jsonify(models.get_dns_checks())
+
+
+@app.route('/api/dns-checks', methods=['POST'])
+@admin_required
+@csrf_required
+@json_body('name', 'hostname')
+def create_dns_check(data):
+    result = models.add_dns_check(data)
+    if not result.get('ok'):
+        return api_error(result.get('error', 'Failed to create DNS check'), 400)
+    return jsonify(result), 201
+
+
+@app.route('/api/dns-checks/<int:dns_id>', methods=['PUT'])
+@admin_required
+@csrf_required
+def update_dns_check(dns_id):
+    dc = models.get_dns_check(dns_id)
+    if not dc:
+        return api_error('DNS check not found', 404)
+    data = request.get_json(silent=True) or {}
+    allowed_keys = ('name', 'hostname', 'record_type', 'expected_value',
+                    'check_interval', 'notify_on_down', 'notify_on_recovery', 'notes', 'tags', 'is_active')
+    kwargs = {k: v for k, v in data.items() if k in allowed_keys}
+    models.update_dns_check(dns_id, **kwargs)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/dns-checks/<int:dns_id>', methods=['DELETE'])
+@admin_required
+@csrf_required
+def delete_dns_check(dns_id):
+    dc = models.get_dns_check(dns_id)
+    if not dc:
+        return api_error('DNS check not found', 404)
+    models.delete_dns_check(dns_id)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/dns-checks/<int:dns_id>/check', methods=['POST'])
+@admin_required
+@csrf_required
+def check_dns_manual(dns_id):
+    dc = models.get_dns_check(dns_id)
+    if not dc:
+        return api_error('DNS check not found', 404)
+    previous_status = dc.get('status')
+    result = dns_checker.check_dns_record(dc)
+    models.save_dns_check(dns_id, result)
+    settings = models.get_settings()
+    _maybe_send_dns_alert(dc, result, settings, previous_status)
+    return jsonify(result)
+
+
+def run_check_for_dns(dc):
+    try:
+        result = dns_checker.check_dns_record(dc)
+        result['dns_id'] = dc['id']
+        result['name'] = dc['name']
+        result['hostname'] = dc['hostname']
+        return result
+    except Exception as e:
+        return {
+            'dns_id': dc['id'], 'name': dc['name'], 'hostname': dc['hostname'],
+            'status': 'down', 'error': str(e),
+        }
+
+
+def _maybe_send_dns_alert(dc, result, settings, previous_status=None):
+    if previous_status is None:
+        return
+    if models.is_in_maintenance_window('dns', dc['id']):
+        return
+    new_status = result['status']
+    is_down = new_status in ('down', 'error')
+    was_up = previous_status in ('up',)
+    is_up = new_status in ('up',)
+    was_down = previous_status in ('down', 'error', 'unknown')
+
+    should_alert = False
+    if is_down and was_up and dc.get('notify_on_down'):
+        should_alert = True
+    elif is_up and was_down and dc.get('notify_on_recovery'):
+        should_alert = True
+
+    if not should_alert:
+        return
+
+    settings = settings or models.get_settings()
+    domain_data = dict(dc)
+    domain_data['status_code'] = result.get('status_code')
+    try:
+        errors = send_alerts(dc['name'], new_status, None, None, settings, domain_data=domain_data)
+    except Exception as e:
+        errors = [str(e)]
+    try:
+        we = send_webhook_alerts(dc['name'], new_status, None, None, settings, domain_data=domain_data)
+        errors.extend(we)
+    except Exception as e:
+        errors.append(str(e))
+
+    if errors:
+        for e in errors:
+            models.add_log('dns_alert_error', f'DNS alert failed for {dc["name"]}: {e}')
+    else:
+        models.add_log('dns_alert', f'DNS alert sent for {dc["name"]}: {new_status}')
+        models.update_dns_last_alerted(dc['id'])
+
+
 # ─── Scheduler Status ──────────────────────────────────────────
 @app.route('/api/scheduler/status', methods=['GET'])
 @login_required
@@ -2134,6 +2249,39 @@ def check_webapps_background():
         logger.error(f"Scheduled webapp check failed: {e}")
 
 
+def check_dns_background():
+    try:
+        with app.app_context():
+            checks = models.get_dns_checks()
+            now = models.timezone_now()
+            due = []
+            for dc in checks:
+                if not dc.get('is_active'):
+                    continue
+                interval = dc.get('check_interval', 300)
+                last = models.parse_dt(dc.get('last_checked'))
+                if last and (now - last).total_seconds() < interval:
+                    continue
+                due.append(dc)
+            if not due:
+                return
+            settings = models.get_settings()
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                futures = {pool.submit(run_check_for_dns, dc): dc for dc in due}
+                for future in as_completed(futures):
+                    r = future.result()
+                    dc = next((d for d in due if d['id'] == r['dns_id']), None)
+                    if dc:
+                        models.save_dns_check(dc['id'], r)
+                        previous_status = dc.get('status')
+                        if not (previous_status == r.get('status') and r.get('status') != 'down'):
+                            models.add_log('dns_check', f'Auto check: {dc["name"]} - {r["status"]}')
+                        _maybe_send_dns_alert(dc, r, settings, previous_status)
+            models.prune_logs()
+    except Exception as e:
+        logger.error(f"Scheduled DNS check failed: {e}")
+
+
 # ─── Graceful shutdown ────────────────────────────────────────
 def shutdown(wait=True):
     """Graceful shutdown. Set wait=True to block until in-flight checks complete (atexit),
@@ -2165,7 +2313,7 @@ def main():
     # Scheduler runs here for `python app.py` dev mode.
     # Under gunicorn, it starts in gunicorn.conf.py post_worker_init instead.
     if not os.environ.get("PYTEST_VERSION"):
-        start_scheduler(check_all_background, check_webapps_background)
+        start_scheduler(check_all_background, check_webapps_background, check_dns_background)
         backup.schedule_backup(sched_mod.scheduler)
         atexit.register(shutdown)
     debug = os.environ.get('FLASK_DEBUG', '0') == '1'

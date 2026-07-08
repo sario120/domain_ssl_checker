@@ -35,7 +35,7 @@ def _try_acquire_lock():
         return False
 
 
-def start_scheduler(check_all_callback, check_webapps_callback=None):
+def start_scheduler(check_all_callback, check_webapps_callback=None, check_dns_callback=None):
     if scheduler.get_job('check_all_domains'):
         return
     if not _try_acquire_lock():
@@ -58,6 +58,14 @@ def start_scheduler(check_all_callback, check_webapps_callback=None):
             minutes=1,
             id='check_webapps',
             name='Check webapps',
+        )
+    if check_dns_callback:
+        scheduler.add_job(
+            check_dns_callback,
+            'interval',
+            minutes=1,
+            id='check_dns',
+            name='Check DNS records',
         )
     retention_days = int(os.environ.get('DATA_RETENTION_DAYS', '90'))
     if not scheduler.get_job('cleanup_old_data'):

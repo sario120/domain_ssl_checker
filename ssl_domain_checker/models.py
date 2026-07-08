@@ -342,6 +342,29 @@ CREATE TABLE IF NOT EXISTS webapp_results (
     checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_webapp_results_app ON webapp_results(webapp_id, checked_at DESC);
+CREATE TABLE IF NOT EXISTS dns_checks (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    hostname TEXT NOT NULL,
+    record_type TEXT NOT NULL DEFAULT 'A',
+    expected_value TEXT,
+    check_interval INTEGER DEFAULT 300,
+    status TEXT DEFAULT 'unknown',
+    last_result TEXT,
+    last_checked TIMESTAMPTZ,
+    last_error TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    notify_on_down BOOLEAN DEFAULT TRUE,
+    notify_on_recovery BOOLEAN DEFAULT TRUE,
+    last_alerted TIMESTAMPTZ,
+    status_changed_at TIMESTAMPTZ,
+    notes TEXT,
+    tags TEXT DEFAULT '',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_dns_checks_status ON dns_checks(status);
+CREATE INDEX IF NOT EXISTS idx_dns_checks_active ON dns_checks(is_active);
 CREATE TABLE IF NOT EXISTS maintenance_windows (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
@@ -1818,3 +1841,119 @@ def is_in_maintenance_window(monitored_type, monitored_id=None):
             if not target_ids or (monitored_id is not None and monitored_id in target_ids):
                 return True
     return False
+
+
+# ─── DNS Checks ────────────────────────────────────────────────────
+
+_ALLOWED_DNS_CHECK_COLS = frozenset({
+    'name', 'hostname', 'record_type', 'expected_value', 'check_interval',
+    'notify_on_down', 'notify_on_recovery', 'notes', 'tags', 'is_active',
+})
+
+
+def get_dns_checks():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM dns_checks ORDER BY name").fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_dns_check(dns_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM dns_checks WHERE id=?", (dns_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def add_dns_check(data):
+    conn = get_db()
+    tags = data.get('tags', '')
+    if isinstance(tags, list):
+        tags = json.dumps(tags)
+    try:
+        cur = conn.execute(
+            "INSERT INTO dns_checks (name, hostname, record_type, expected_value, "
+            "check_interval, notify_on_down, notify_on_recovery, notes, tags) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            (data['name'].strip(), data['hostname'].strip(), data.get('record_type', 'A'),
+             data.get('expected_value') or None, data.get('check_interval', 300),
+             bool(data.get('notify_on_down', True)), bool(data.get('notify_on_recovery', True)),
+             data.get('notes', ''), tags)
+        )
+        new_id = cur.fetchone()['id']
+        conn.commit()
+        return {"ok": True, "id": new_id}
+    except Exception as e:
+        conn.rollback()
+        logger.exception("Failed to add DNS check")
+        return {"ok": False, "error": str(e)}
+
+
+def update_dns_check(dns_id, **kwargs):
+    sets = []
+    vals = []
+    for k, v in kwargs.items():
+        if k not in _ALLOWED_DNS_CHECK_COLS:
+            continue
+        if k in ('notify_on_down', 'notify_on_recovery', 'is_active'):
+            v = bool(v)
+        if k == 'tags' and isinstance(v, list):
+            v = json.dumps(v)
+        sets.append(f"{k}=?")
+        vals.append(v)
+    if not sets:
+        return False
+    conn = get_db()
+    vals.append(dns_id)
+    conn.execute(f"UPDATE dns_checks SET {', '.join(sets)}, updated_at=? WHERE id=?",
+                 vals + [timezone_now_str(), dns_id])
+    conn.commit()
+    return True
+
+
+def delete_dns_check(dns_id):
+    conn = get_db()
+    conn.execute("DELETE FROM dns_checks WHERE id=?", (dns_id,))
+    conn.commit()
+
+
+def save_dns_check(dns_id, result):
+    conn = get_db()
+    now = timezone_now_str()
+    row = conn.execute("SELECT status FROM dns_checks WHERE id=?", (dns_id,)).fetchone()
+    old_status = row['status'] if row else None
+    new_status = result['status']
+    status_changed = old_status is not None and old_status != new_status
+    conn.execute(
+        "UPDATE dns_checks SET status=?, last_result=?, last_checked=?, last_error=?, "
+        "status_changed_at=CASE WHEN ? THEN ? ELSE status_changed_at END, updated_at=? WHERE id=?",
+        (new_status, (result.get('values') or [None])[0] if result.get('values') else None,
+         now, result.get('error'),
+         status_changed, now if status_changed else None, now, dns_id)
+    )
+    conn.commit()
+
+
+def update_dns_last_alerted(dns_id):
+    conn = get_db()
+    conn.execute("UPDATE dns_checks SET last_alerted=? WHERE id=?", (timezone_now_str(), dns_id))
+    conn.commit()
+
+
+def count_dns_checks():
+    conn = get_db()
+    row = conn.execute("SELECT COUNT(*) AS cnt FROM dns_checks").fetchone()
+    return row['cnt'] if row else 0
+
+
+def get_dns_check_stats():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT COALESCE(status, 'unknown') AS st, COUNT(*) AS cnt FROM dns_checks GROUP BY st"
+    ).fetchall()
+    stats = {'up': 0, 'down': 0, 'unknown': 0}
+    total = 0
+    for r in rows:
+        if r['st'] in stats:
+            stats[r['st']] = r['cnt']
+            total += r['cnt']
+    stats['total'] = total
+    return stats

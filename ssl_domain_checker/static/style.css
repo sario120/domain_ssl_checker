@@ -2054,3 +2054,9 @@ body.dark .badge-json { background: rgba(249,115,22,0.15); color: #fdba74; borde
 #maintenance-window-form { max-width: 500px; margin-top: 16px; }
 .form-row-inline { display: flex; gap: 16px; }
 .form-row-inline > div { flex: 1; }
+
+/* DNS Checks */
+.dns-hostname { font-size: 13px; color: var(--text); word-break: break-all; }
+.dns-type-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: var(--bg-secondary); color: var(--text-muted); margin-left: 6px; text-transform: uppercase; letter-spacing: 0.3px; }
+.card-detail { display: flex; align-items: center; margin-top: 2px; }
+#view-dns .view-toggle-label { font-size: 12px; }

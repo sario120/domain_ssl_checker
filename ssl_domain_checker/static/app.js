@@ -75,6 +75,7 @@ function activateView(viewName) {
   if (viewName === 'domains') loadDomains('full', true);
   if (viewName === 'sslcerts') loadDomains('ssl_only', true);
   if (viewName === 'webapps') { loadWebappViewPrefs(); loadWebApps(true); }
+  if (viewName === 'dns') loadDnsChecks();
 }
 
 document.querySelectorAll('.sidebar-item').forEach(tab => {
@@ -287,6 +288,14 @@ document.addEventListener('click', (e) => {
   }
   else if (action === 'add-webapp') { openWebAppModal(null); }
   else if (action === 'close-webapp-modal') { closeWebAppModal(); }
+  else if (action === 'add-dns-check') { openDnsModal(null); }
+  else if (action === 'close-dns-modal') { closeDnsModal(); }
+  else if (action === 'edit-dns-check') { var dnsId = parseInt(btn.dataset.id); var dc = _dnsCache && _dnsCache.find(function(d) { return d.id === dnsId; }); if (dc) openDnsModal(dc); }
+  else if (action === 'delete-dns-check') { var dnsId = parseInt(btn.dataset.id); if (!confirm('Delete this DNS check?')) return; api('DELETE', '/api/dns-checks/' + dnsId).then(function() { toast('DNS check deleted'); loadDnsChecks(); }).catch(function(err) { toast(err.message, 'error'); }); }
+  else if (action === 'check-dns') { var dnsId = parseInt(btn.dataset.id); checkSingleDns(dnsId); }
+  else if (action === 'check-all-dns') { checkAllDns(); }
+  else if (action === 'toggle-view-dns') { toggleDnsView(); }
+  else if (action === 'set-dns-filter') { _dnsFilter = btn.dataset.dnsFilter; loadDnsChecks(); }
   else if (action === 'toggle-view-webapps') {
     _webappViewMode = _webappViewMode === 'table' ? 'cards' : 'table';
     var label = btn.querySelector('.view-toggle-label');
@@ -794,6 +803,14 @@ document.getElementById('webapp-filters').addEventListener('click', (e) => {
   applyWebAppFilters(_webappsCache || []);
   saveWebappViewPrefs();
 });
+document.getElementById('dns-filters').addEventListener('click', (e) => {
+  var btn = e.target.closest('[data-dns-filter]');
+  if (!btn) return;
+  document.querySelectorAll('#dns-filters .log-filter').forEach(function (b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  _dnsFilter = btn.dataset.dnsFilter;
+  loadDnsChecks();
+});
 document.getElementById('sort-webapp-select').addEventListener('change', (e) => {
   var opt = e.target.options[e.target.selectedIndex];
   _webappSort.key = opt.value;
@@ -897,6 +914,33 @@ document.getElementById('webapp-form').addEventListener('submit', async (e) => {
     closeWebAppModal();
     loadWebApps(true);
     toast(id ? 'Web app updated' : 'Web app added');
+  } catch (e) { toast(e.message, 'error'); }
+});
+
+// ─── DNS form submit ──────────────────────────────────────────────
+document.getElementById('dns-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  var id = document.getElementById('dns-id').value;
+  var data = {
+    name: document.getElementById('dns-name').value.trim(),
+    hostname: document.getElementById('dns-hostname').value.trim(),
+    record_type: document.getElementById('dns-record-type').value,
+    expected_value: document.getElementById('dns-expected').value.trim() || null,
+    check_interval: parseInt(document.getElementById('dns-check-interval').value) || 300,
+    notes: document.getElementById('dns-notes').value.trim(),
+    notify_on_down: document.getElementById('dns-notify-down').checked,
+    notify_on_recovery: document.getElementById('dns-notify-recovery').checked,
+  };
+  if (!data.name || !data.hostname) { toast('Name and hostname are required', 'error'); return; }
+  try {
+    if (id) {
+      await api('PUT', '/api/dns-checks/' + id, data);
+    } else {
+      await api('POST', '/api/dns-checks', data);
+    }
+    closeDnsModal();
+    loadDnsChecks();
+    toast(id ? 'DNS check updated' : 'DNS check added');
   } catch (e) { toast(e.message, 'error'); }
 });
 
@@ -1620,6 +1664,11 @@ let _selectedWebapps = new Set();
 let _webappGroupByStatus = false;
 let _webappCollapsedGroups = new Set();
 
+// ─── DNS Checks ───────────────────────────────────────────────────
+let _dnsCache = null;
+let _dnsFilter = 'all';
+let _dnsViewMode = 'cards';
+
 function saveWebappViewPrefs() {
   var prefs = {
     viewMode: _webappViewMode,
@@ -2313,6 +2362,126 @@ function closeWebAppModal() {
   document.getElementById('webapp-modal').classList.remove('open');
 }
 
+// ─── DNS Checks ───────────────────────────────────────────────────
+function loadDnsChecks() {
+  api('GET', '/api/dns-checks').then(function (checks) {
+    _dnsCache = checks;
+    var filtered = checks;
+    if (_dnsFilter !== 'all') {
+      filtered = checks.filter(function (c) { return c.status === _dnsFilter; });
+    }
+    document.getElementById('dns-count-all').textContent = checks.length;
+    document.getElementById('dns-count-up').textContent = checks.filter(function (c) { return c.status === 'up'; }).length;
+    document.getElementById('dns-count-down').textContent = checks.filter(function (c) { return c.status === 'down'; }).length;
+    document.getElementById('dns-result').textContent = 'Showing ' + filtered.length + ' DNS check' + (filtered.length !== 1 ? 's' : '');
+    if (!filtered.length) {
+      document.getElementById('dns-list').innerHTML = '';
+      document.getElementById('dns-table').style.display = 'none';
+      document.getElementById('dns-empty').style.display = checks.length ? '' : '';
+      return;
+    }
+    document.getElementById('dns-empty').style.display = 'none';
+    if (_dnsViewMode === 'cards') {
+      renderDnsCards(filtered);
+      document.getElementById('dns-table').style.display = 'none';
+    } else {
+      renderDnsTable(filtered);
+      document.getElementById('dns-table').style.display = '';
+    }
+  }).catch(function (err) {
+    document.getElementById('dns-result').textContent = 'Failed to load: ' + err.message;
+  });
+}
+
+function renderDnsCards(checks) {
+  var container = document.getElementById('dns-list');
+  container.innerHTML = checks.map(function (c) {
+    var statusCls = (c.status === 'up' ? 'status-up' : c.status === 'down' ? 'status-down' : 'status-unknown');
+    return '<div class="webapp-card card-hover ' + statusCls + '" data-id="' + c.id + '">' +
+      '<div class="card-main">' +
+      '<div class="card-top">' +
+      '<div class="card-name" title="' + escHtml(c.name) + '">' + escHtml(c.name) + '</div>' +
+      '<div class="card-status"><span class="domain-badge status-badge ' + statusCls + '">' + (c.status || 'UNKNOWN').toUpperCase() + '</span></div>' +
+      '<div class="card-actions">' +
+      '<button class="btn btn-sm btn-secondary" data-action="check-dns" data-id="' + c.id + '" title="Check now">&#x21bb;</button>' +
+      '<button class="btn btn-sm btn-secondary" data-action="edit-dns-check" data-id="' + c.id + '" title="Edit">&#9998;</button>' +
+      '<button class="btn btn-sm btn-danger" data-action="delete-dns-check" data-id="' + c.id + '" title="Delete">&times;</button>' +
+      '</div></div>' +
+      '<div class="card-detail"><span class="dns-hostname">' + escHtml(c.hostname) + '</span><span class="dns-type-badge">' + (c.record_type || 'A') + '</span></div>' +
+      '<div class="card-meta">' +
+      (c.last_result ? '<span>Value: ' + escHtml(c.last_result.length > 40 ? c.last_result.slice(0, 37) + '...' : c.last_result) + '</span>' : '') +
+      (c.last_checked ? '<span>Checked: ' + relativeTime(c.last_checked) + '</span>' : '') +
+      (c.last_error ? '<span class="error">' + escHtml(c.last_error) + '</span>' : '') +
+      '</div></div></div>';
+  }).join('');
+}
+
+function renderDnsTable(checks) {
+  var body = document.getElementById('dns-table-body');
+  body.innerHTML = checks.map(function (c) {
+    var statusCls = (c.status === 'up' ? 'status-up' : c.status === 'down' ? 'status-down' : 'status-unknown');
+    return '<tr>' +
+      '<td class="col-name">' + escHtml(c.name) + '</td>' +
+      '<td class="col-hostname">' + escHtml(c.hostname) + '</td>' +
+      '<td class="col-type"><span class="dns-type-badge">' + (c.record_type || 'A') + '</span></td>' +
+      '<td class="col-expected">' + (c.expected_value ? escHtml(c.expected_value) : '—') + '</td>' +
+      '<td class="col-status"><span class="domain-badge status-badge ' + statusCls + '">' + (c.status || 'UNKNOWN').toUpperCase() + '</span></td>' +
+      '<td class="col-last-result">' + (c.last_result ? escHtml(c.last_result.length > 30 ? c.last_result.slice(0, 27) + '...' : c.last_result) : '—') + '</td>' +
+      '<td class="col-checked">' + (c.last_checked ? relativeTime(c.last_checked) : 'Never') + '</td>' +
+      '<td class="col-actions">' +
+      '<button class="btn btn-sm btn-secondary" data-action="check-dns" data-id="' + c.id + '">&#x21bb;</button>' +
+      '<button class="btn btn-sm btn-secondary" data-action="edit-dns-check" data-id="' + c.id + '">&#9998;</button>' +
+      '<button class="btn btn-sm btn-danger" data-action="delete-dns-check" data-id="' + c.id + '">&times;</button></td></tr>';
+  }).join('');
+}
+
+function openDnsModal(dc) {
+  document.getElementById('dns-id').value = dc ? dc.id : '';
+  document.getElementById('dns-modal-title').textContent = dc ? 'Edit DNS Check' : 'Add DNS Check';
+  document.getElementById('dns-name').value = dc ? dc.name : '';
+  document.getElementById('dns-hostname').value = dc ? dc.hostname : '';
+  document.getElementById('dns-record-type').value = dc ? (dc.record_type || 'A') : 'A';
+  document.getElementById('dns-expected').value = dc ? (dc.expected_value || '') : '';
+  document.getElementById('dns-check-interval').value = dc ? (dc.check_interval || 300) : 300;
+  document.getElementById('dns-notes').value = dc ? (dc.notes || '') : '';
+  document.getElementById('dns-notify-down').checked = dc ? (dc.notify_on_down !== false) : true;
+  document.getElementById('dns-notify-recovery').checked = dc ? (dc.notify_on_recovery !== false) : true;
+  document.getElementById('dns-modal').classList.add('open');
+}
+
+function closeDnsModal() {
+  document.getElementById('dns-modal').classList.remove('open');
+}
+
+function checkSingleDns(dnsId) {
+  api('POST', '/api/dns-checks/' + dnsId + '/check').then(function () {
+    toast('DNS check completed');
+    loadDnsChecks();
+  }).catch(function (err) {
+    toast(err.message, 'error');
+  });
+}
+
+function checkAllDns() {
+  var checks = _dnsCache || [];
+  if (!checks.length) return;
+  var promises = checks.map(function (c) {
+    return api('POST', '/api/dns-checks/' + c.id + '/check').catch(function () {});
+  });
+  Promise.all(promises).then(function () {
+    toast('All DNS checks completed');
+    loadDnsChecks();
+  });
+}
+
+function toggleDnsView() {
+  _dnsViewMode = _dnsViewMode === 'cards' ? 'table' : 'cards';
+  document.querySelector('#view-dns .view-toggle-label').textContent = _dnsViewMode === 'cards' ? 'Table' : 'Cards';
+  document.querySelector('#view-dns .view-toggle-icon').innerHTML = _dnsViewMode === 'cards' ? '&#9776;' : '&#9635;';
+  loadDnsChecks();
+}
+
+// ─── setHealth ─────────────────────────────────────────────────────
 function setHealth(prefix, pct) {
   document.getElementById(prefix + '-pct').textContent = pct + '%';
   const bar = document.getElementById(prefix + '-bar');
