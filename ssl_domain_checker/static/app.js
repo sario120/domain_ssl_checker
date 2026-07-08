@@ -1191,6 +1191,7 @@ function switchSettingsTab(stab) {
   if (stab === 'users') loadUsers();
   if (stab === 'apikeys') loadApiKeys();
   if (stab === 'emailtpl') loadEmailTemplates();
+  if (stab === 'maintenance') loadMaintenanceWindows();
 }
 
 // ─── Toast (stacking) ───────────────────────────────────────────
@@ -3468,6 +3469,7 @@ function loadSettingsTabData() {
   if (activeTab === 'users') loadUsers();
   if (activeTab === 'apikeys') loadApiKeys();
   if (activeTab === 'emailtpl') loadEmailTemplates();
+  if (activeTab === 'maintenance') loadMaintenanceWindows();
 }
 
 function populateSettingsForm(s) {
@@ -4540,6 +4542,110 @@ document.getElementById('email-tpl-form').addEventListener('submit', async (e) =
     toast(err.message, 'error');
   } finally {
     setLoading(btn, false);
+  }
+});
+
+
+// ─── Maintenance Windows ─────────────────────────────────────────
+var _editingMwId = null;
+
+function loadMaintenanceWindows() {
+  api('GET', '/api/maintenance-windows').then(function (windows) {
+    var container = document.getElementById('maintenance-window-list');
+    if (!windows.length) {
+      container.innerHTML = '<div class="empty-state"><p>No maintenance windows configured.</p></div>';
+      return;
+    }
+    var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    container.innerHTML = windows.map(function (w) {
+      var dayLabel = w.day_of_week === 7 ? 'Every day' : days[w.day_of_week];
+      return '<div class="mw-item" data-id="' + w.id + '">' +
+        '<div class="mw-info">' +
+        '<strong>' + escHtml(w.name) + '</strong>' +
+        '<span class="text-muted">' + escHtml(dayLabel) + ' ' + escHtml(w.start_time) + '–' + escHtml(w.end_time) + '</span>' +
+        (w.description ? '<span class="text-muted">' + escHtml(w.description) + '</span>' : '') +
+        '<span class="text-muted">Target: ' + escHtml(w.target_type === 'all' ? 'All checks' : w.target_type === 'webapp' ? 'Web apps' : w.target_type === 'domain' ? 'Domains' : 'SSL') + '</span>' +
+        '</div>' +
+        '<div class="mw-actions">' +
+        '<span class="mw-status ' + (w.is_active ? 'active' : 'inactive') + '">' + (w.is_active ? 'Active' : 'Inactive') + '</span>' +
+        '<button class="btn btn-sm btn-secondary" data-action="edit-maintenance-window" data-id="' + w.id + '">Edit</button>' +
+        '<button class="btn btn-sm btn-danger" data-action="delete-maintenance-window" data-id="' + w.id + '">Delete</button>' +
+        '</div></div>';
+    }).join('');
+  }).catch(function (err) {
+    document.getElementById('maintenance-window-list').innerHTML = '<div class="empty-state"><p class="error">Failed to load: ' + escHtml(err.message) + '</p></div>';
+  });
+}
+
+function showMaintenanceForm(mw) {
+  _editingMwId = mw ? mw.id : null;
+  document.getElementById('maintenance-window-list').style.display = 'none';
+  var form = document.getElementById('maintenance-window-form');
+  form.style.display = '';
+  document.getElementById('mw-name').value = mw ? mw.name : '';
+  document.getElementById('mw-description').value = mw ? (mw.description || '') : '';
+  document.getElementById('mw-day').value = mw ? (mw.day_of_week != null ? mw.day_of_week : 7) : 7;
+  document.getElementById('mw-start').value = mw ? mw.start_time : '';
+  document.getElementById('mw-end').value = mw ? mw.end_time : '';
+  document.getElementById('mw-target').value = mw ? mw.target_type : 'all';
+  document.getElementById('btn-save-mw').textContent = mw ? 'Update' : 'Add';
+}
+
+function hideMaintenanceForm() {
+  _editingMwId = null;
+  document.getElementById('maintenance-window-list').style.display = '';
+  document.getElementById('maintenance-window-form').style.display = 'none';
+}
+
+// Click handlers
+document.addEventListener('click', function (e) {
+  var action = e.target.dataset.action;
+  if (action === 'add-maintenance-window') {
+    showMaintenanceForm(null);
+  } else if (action === 'cancel-maintenance-window') {
+    hideMaintenanceForm();
+  } else if (action === 'save-maintenance-window') {
+    var name = document.getElementById('mw-name').value.trim();
+    var start = document.getElementById('mw-start').value;
+    var end = document.getElementById('mw-end').value;
+    if (!name) { toast('Name is required', 'error'); return; }
+    if (!start || !end) { toast('Start and end times are required', 'error'); return; }
+    var data = {
+      name: name,
+      description: document.getElementById('mw-description').value.trim(),
+      day_of_week: parseInt(document.getElementById('mw-day').value) || 7,
+      start_time: start,
+      end_time: end,
+      target_type: document.getElementById('mw-target').value,
+    };
+    var btn = document.getElementById('btn-save-mw');
+    setLoading(btn, true);
+    var method = _editingMwId ? 'PUT' : 'POST';
+    var url = _editingMwId ? '/api/maintenance-windows/' + _editingMwId : '/api/maintenance-windows';
+    api(method, url, data).then(function () {
+      toast(_editingMwId ? 'Maintenance window updated' : 'Maintenance window added');
+      hideMaintenanceForm();
+      loadMaintenanceWindows();
+    }).catch(function (err) {
+      toast(err.message, 'error');
+    }).finally(function () {
+      setLoading(btn, false);
+    });
+  } else if (action === 'edit-maintenance-window') {
+    var wid = parseInt(e.target.dataset.id);
+    api('GET', '/api/maintenance-windows').then(function (windows) {
+      var mw = windows.find(function (w) { return w.id === wid; });
+      if (mw) showMaintenanceForm(mw);
+    });
+  } else if (action === 'delete-maintenance-window') {
+    var wid = parseInt(e.target.dataset.id);
+    if (!confirm('Delete this maintenance window?')) return;
+    api('DELETE', '/api/maintenance-windows/' + wid).then(function () {
+      toast('Maintenance window deleted');
+      loadMaintenanceWindows();
+    }).catch(function (err) {
+      toast(err.message, 'error');
+    });
   }
 });
 

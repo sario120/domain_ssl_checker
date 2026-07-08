@@ -580,6 +580,7 @@
         <button class="settings-tab" data-stab="apikeys" tabindex="0">API Keys</button>
 
         <button class="settings-tab" data-stab="emailtpl" tabindex="0">Email Templates</button>
+        <button class="settings-tab" data-stab="maintenance" tabindex="0">Maintenance</button>
       </div>
 
       <!-- SMTP -->
@@ -861,6 +862,68 @@
           </div>
         </form>
         <div id="email-tpl-preview" class="email-tpl-preview" style="display:none"></div>
+      </div>
+
+      <!-- Maintenance Windows -->
+      <div class="settings-pane" id="stab-maintenance">
+        <div class="pane-header">
+          <div>
+            <h3>Maintenance Windows</h3>
+            <p class="pane-subtitle">Schedule time periods when alerts are suppressed for maintenance.</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-primary" data-action="add-maintenance-window">Add Window</button>
+          </div>
+        </div>
+        <div id="maintenance-window-list" class="settings-section">
+          <div class="empty-state"><p>No maintenance windows configured.</p></div>
+        </div>
+        <div id="maintenance-window-form" class="settings-form" style="display:none">
+          <div class="form-row">
+            <label for="mw-name">Name</label>
+            <input type="text" id="mw-name" placeholder="e.g. Monthly database migration" maxlength="100">
+          </div>
+          <div class="form-row">
+            <label for="mw-day">Day of Week</label>
+            <select id="mw-day">
+              <option value="7">Every day</option>
+              <option value="0">Sunday</option>
+              <option value="1">Monday</option>
+              <option value="2">Tuesday</option>
+              <option value="3">Wednesday</option>
+              <option value="4">Thursday</option>
+              <option value="5">Friday</option>
+              <option value="6">Saturday</option>
+            </select>
+          </div>
+          <div class="form-row form-row-inline">
+            <div>
+              <label for="mw-start">Start Time</label>
+              <input type="time" id="mw-start" required>
+            </div>
+            <div>
+              <label for="mw-end">End Time</label>
+              <input type="time" id="mw-end" required>
+            </div>
+          </div>
+          <div class="form-row">
+            <label for="mw-target">Target</label>
+            <select id="mw-target">
+              <option value="all">All checks</option>
+              <option value="webapp">Web apps only</option>
+              <option value="domain">Domains only</option>
+              <option value="ssl">SSL only</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label for="mw-description">Description (optional)</label>
+            <input type="text" id="mw-description" placeholder="Brief reason for this window">
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-secondary" data-action="cancel-maintenance-window">Cancel</button>
+            <button type="button" class="btn btn-primary" data-action="save-maintenance-window" id="btn-save-mw">Save</button>
+          </div>
+        </div>
       </div>
 
       <div class="settings-footer">

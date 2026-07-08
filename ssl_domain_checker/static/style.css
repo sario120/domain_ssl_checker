@@ -2032,3 +2032,25 @@ body.dark .badge-json { background: rgba(249,115,22,0.15); color: #fdba74; borde
   margin-bottom: 20px;
   line-height: 1.5;
 }
+
+/* Maintenance Windows */
+.mw-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: var(--card-bg);
+}
+.mw-info { display: flex; flex-direction: column; gap: 2px; }
+.mw-info strong { font-size: 14px; }
+.mw-info .text-muted { font-size: 12px; }
+.mw-actions { display: flex; align-items: center; gap: 8px; }
+.mw-status { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+.mw-status.active { background: var(--green-bg); color: var(--green); }
+.mw-status.inactive { background: var(--bg-secondary); color: var(--text-muted); }
+#maintenance-window-form { max-width: 500px; margin-top: 16px; }
+.form-row-inline { display: flex; gap: 16px; }
+.form-row-inline > div { flex: 1; }

@@ -342,6 +342,19 @@ CREATE TABLE IF NOT EXISTS webapp_results (
     checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_webapp_results_app ON webapp_results(webapp_id, checked_at DESC);
+CREATE TABLE IF NOT EXISTS maintenance_windows (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    day_of_week INTEGER NOT NULL DEFAULT 7,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    timezone TEXT DEFAULT 'UTC',
+    target_type TEXT DEFAULT 'all',
+    target_ids TEXT DEFAULT '[]',
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
 """;
 
 _MIGRATION_DOMAIN_COLS = frozenset({
@@ -1715,3 +1728,93 @@ def get_webapp_recent_failures(limit=5):
         {order} LIMIT ?
     """, (limit,)).fetchall()
     return [dict(r) for r in rows]
+
+
+# ─── Maintenance Windows ──────────────────────────────────────────
+
+def get_maintenance_windows():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM maintenance_windows ORDER BY name").fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_maintenance_window(mw_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM maintenance_windows WHERE id=?", (mw_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def add_maintenance_window(data):
+    conn = get_db()
+    try:
+        cur = conn.execute(
+            "INSERT INTO maintenance_windows (name, description, day_of_week, start_time, end_time, "
+            "timezone, target_type, target_ids, is_active) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            (data['name'], data.get('description', ''), data.get('day_of_week', 7),
+             data['start_time'], data['end_time'], data.get('timezone', 'UTC'),
+             data.get('target_type', 'all'), json.dumps(data.get('target_ids', [])),
+             bool(data.get('is_active', True)))
+        )
+        new_id = cur.fetchone()['id']
+        conn.commit()
+        return {"ok": True, "id": new_id}
+    except Exception as e:
+        conn.rollback()
+        logger.exception("Failed to add maintenance window")
+        return {"ok": False, "error": str(e)}
+
+
+def update_maintenance_window(mw_id, data):
+    allowed = frozenset({'name', 'description', 'day_of_week', 'start_time', 'end_time',
+                         'timezone', 'target_type', 'target_ids', 'is_active'})
+    sets = []
+    vals = []
+    for k, v in data.items():
+        if k not in allowed:
+            continue
+        if k == 'is_active':
+            v = bool(v)
+        if k == 'target_ids' and isinstance(v, list):
+            v = json.dumps(v)
+        sets.append(f"{k}=?")
+        vals.append(v)
+    if not sets:
+        return False
+    conn = get_db()
+    vals.append(mw_id)
+    conn.execute(f"UPDATE maintenance_windows SET {', '.join(sets)} WHERE id=?", vals)
+    conn.commit()
+    return True
+
+
+def delete_maintenance_window(mw_id):
+    conn = get_db()
+    conn.execute("DELETE FROM maintenance_windows WHERE id=?", (mw_id,))
+    conn.commit()
+
+
+def is_in_maintenance_window(monitored_type, monitored_id=None):
+    """Check if a monitored item is currently covered by an active maintenance window.
+    monitored_type: 'webapp', 'domain', 'ssl', or 'all'
+    Returns True if any active window covers the current time on today's day of week.
+    """
+    conn = get_db()
+    now = timezone_now()
+    weekday = now.weekday()
+    current_time = now.strftime("%H:%M")
+    rows = conn.execute(
+        "SELECT * FROM maintenance_windows WHERE is_active=TRUE "
+        "AND (day_of_week=? OR day_of_week=7) "
+        "AND ((start_time <= end_time AND start_time <= ? AND end_time >= ?) "
+        "OR (start_time > end_time AND (start_time <= ? OR end_time >= ?)))",
+        ((weekday + 1) % 7, current_time, current_time, current_time, current_time)
+    ).fetchall()
+    for row in rows:
+        if row['target_type'] == 'all':
+            return True
+        if row['target_type'] == monitored_type:
+            target_ids = json.loads(row['target_ids']) if row['target_ids'] else []
+            if not target_ids or (monitored_id is not None and monitored_id in target_ids):
+                return True
+    return False

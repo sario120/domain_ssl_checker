@@ -674,6 +674,8 @@ def run_check_for_domain(domain):
 
 
 def _maybe_send_alert(domain, result, settings):
+    if models.is_in_maintenance_window('domain', domain['id']) or models.is_in_maintenance_window('ssl', domain['id']):
+        return
     ssl_days = result.get('ssl_days_left')
     domain_days = result.get('domain_days_left')
     v = domain.get('ssl_alert_threshold')
@@ -895,6 +897,8 @@ def run_check_for_webapp(wa, retries=1):
 
 def _maybe_send_webapp_alert(wa, result, settings, previous_status=None):
     if previous_status is None:
+        return
+    if models.is_in_maintenance_window('webapp', wa['id']):
         return
     new_status = result['status']
     is_down = new_status in ('down', 'error')
@@ -1224,6 +1228,47 @@ def webapp_logs():
     rows = models.get_logs(limit=limit, offset=offset, log_type=log_type)
     total = models.get_logs_count(log_type=log_type)
     return jsonify({'logs': rows, 'total': total})
+
+
+# ─── Maintenance Windows ──────────────────────────────────────────
+@app.route('/api/maintenance-windows', methods=['GET'])
+@login_required
+def list_maintenance_windows():
+    return jsonify(models.get_maintenance_windows())
+
+
+@app.route('/api/maintenance-windows', methods=['POST'])
+@admin_required
+@csrf_required
+@json_body('name', 'start_time', 'end_time')
+def create_maintenance_window(data):
+    result = models.add_maintenance_window(data)
+    if not result.get('ok'):
+        return api_error(result.get('error', 'Failed to create maintenance window'), 400)
+    return jsonify(result), 201
+
+
+@app.route('/api/maintenance-windows/<int:mw_id>', methods=['PUT'])
+@admin_required
+@csrf_required
+def update_maintenance_window(mw_id):
+    mw = models.get_maintenance_window(mw_id)
+    if not mw:
+        return api_error('Maintenance window not found', 404)
+    data = request.get_json(silent=True) or {}
+    models.update_maintenance_window(mw_id, data)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/maintenance-windows/<int:mw_id>', methods=['DELETE'])
+@admin_required
+@csrf_required
+def delete_maintenance_window(mw_id):
+    mw = models.get_maintenance_window(mw_id)
+    if not mw:
+        return api_error('Maintenance window not found', 404)
+    models.delete_maintenance_window(mw_id)
+    return jsonify({'ok': True})
 
 
 # ─── Scheduler Status ──────────────────────────────────────────
