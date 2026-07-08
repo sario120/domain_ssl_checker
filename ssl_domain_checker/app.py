@@ -1868,7 +1868,8 @@ def test_webhook_route():
         return api_error('Webhook URL must be HTTPS')
     try:
         from webhook import send_test_webhook
-        send_test_webhook(webhook_type, webhook_url)
+        settings = models.get_settings()
+        send_test_webhook(webhook_type, webhook_url, settings)
         models.add_log('info', f'Test {webhook_type} alert sent', username=current_username())
         return jsonify({'message': f'Test {webhook_type} sent'})
     except Exception as e:

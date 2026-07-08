@@ -214,6 +214,10 @@ CREATE TABLE IF NOT EXISTS settings (
     alert_emails TEXT DEFAULT '',
     slack_webhook_url TEXT DEFAULT '', slack_enabled BOOLEAN DEFAULT FALSE,
     zulip_webhook_url TEXT DEFAULT '', zulip_enabled BOOLEAN DEFAULT FALSE,
+    discord_webhook_url TEXT DEFAULT '', discord_enabled BOOLEAN DEFAULT FALSE,
+    telegram_bot_token TEXT DEFAULT '', telegram_chat_id TEXT DEFAULT '',
+    telegram_enabled BOOLEAN DEFAULT FALSE,
+    teams_webhook_url TEXT DEFAULT '', teams_enabled BOOLEAN DEFAULT FALSE,
     last_summary_sent TIMESTAMPTZ
 );
 CREATE TABLE IF NOT EXISTS logs (
@@ -388,6 +392,9 @@ _MIGRATION_DOMAIN_COLS = frozenset({
 _MIGRATION_SETTINGS_COLS = frozenset({
     'last_summary_sent', 'slack_webhook_url', 'slack_enabled',
     'zulip_webhook_url', 'zulip_enabled',
+    'discord_webhook_url', 'discord_enabled',
+    'telegram_bot_token', 'telegram_chat_id', 'telegram_enabled',
+    'teams_webhook_url', 'teams_enabled',
     'backup_schedule_hour', 'backup_schedule_minute', 'max_backups',
     'log_retention_days',
 })
@@ -444,6 +451,10 @@ def _run_postgres_migrations():
     for col, dtype in [
         ('slack_webhook_url', 'TEXT'), ('slack_enabled', 'BOOLEAN'),
         ('zulip_webhook_url', 'TEXT'), ('zulip_enabled', 'BOOLEAN'),
+        ('discord_webhook_url', 'TEXT'), ('discord_enabled', 'BOOLEAN'),
+        ('telegram_bot_token', 'TEXT'), ('telegram_chat_id', 'TEXT'),
+        ('telegram_enabled', 'BOOLEAN'),
+        ('teams_webhook_url', 'TEXT'), ('teams_enabled', 'BOOLEAN'),
     ]:
         if col not in db.table_columns('settings'):
             if col not in _MIGRATION_SETTINGS_COLS:
@@ -567,11 +578,15 @@ _ALLOWED_SETTINGS_COLS = frozenset({
     'smtp_server', 'smtp_port', 'smtp_email', 'smtp_password', 'smtp_enabled',
     'ssl_alert_threshold', 'domain_alert_threshold', 'alert_emails',
     'slack_webhook_url', 'slack_enabled', 'zulip_webhook_url', 'zulip_enabled',
+    'discord_webhook_url', 'discord_enabled',
+    'telegram_bot_token', 'telegram_chat_id', 'telegram_enabled',
+    'teams_webhook_url', 'teams_enabled',
     'email_templates', 'backup_schedule_hour', 'backup_schedule_minute', 'max_backups',
     'log_retention_days',
 })
 _ALLOWED_USER_COLS = frozenset({'password', 'role', 'email'})
-_BOOLEAN_SETTINGS_COLS = frozenset({'smtp_enabled', 'slack_enabled', 'zulip_enabled'})
+_BOOLEAN_SETTINGS_COLS = frozenset({'smtp_enabled', 'slack_enabled', 'zulip_enabled',
+                                     'discord_enabled', 'telegram_enabled', 'teams_enabled'})
 
 
 def update_domain(domain_id, url=None, domain_type=None, notes=None, manual_expiry_date=None, manual_registrar=None):

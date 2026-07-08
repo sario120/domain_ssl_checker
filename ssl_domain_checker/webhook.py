@@ -57,6 +57,25 @@ def send_webhook_alerts(domain_name, status, ssl_days_left, domain_days_left, se
             _send_zulip(zulip_url, domain_name, status, ssl_days_left, domain_days_left, domain_data)
         except Exception as e:
             errors.append(f"Zulip: {e}")
+    discord_url = settings.get('discord_webhook_url', '')
+    if discord_url and settings.get('discord_enabled'):
+        try:
+            _send_discord(discord_url, domain_name, status, ssl_days_left, domain_days_left, domain_data)
+        except Exception as e:
+            errors.append(f"Discord: {e}")
+    telegram_token = settings.get('telegram_bot_token', '')
+    telegram_chat = settings.get('telegram_chat_id', '')
+    if telegram_token and telegram_chat and settings.get('telegram_enabled'):
+        try:
+            _send_telegram(telegram_token, telegram_chat, domain_name, status, ssl_days_left, domain_days_left, domain_data)
+        except Exception as e:
+            errors.append(f"Telegram: {e}")
+    teams_url = settings.get('teams_webhook_url', '')
+    if teams_url and settings.get('teams_enabled'):
+        try:
+            _send_teams(teams_url, domain_name, status, ssl_days_left, domain_days_left, domain_data)
+        except Exception as e:
+            errors.append(f"Teams: {e}")
     return errors
 
 
@@ -82,7 +101,7 @@ def _send_slack(webhook_url, domain_name, status, ssl_days_left, domain_days_lef
         raise Exception(f"HTTP {resp.status_code}")
 
 
-def send_test_webhook(webhook_type, webhook_url):
+def send_test_webhook(webhook_type, webhook_url, settings=None):
     """Send a test message to a webhook."""
     if not validate_webhook_url(webhook_url):
         raise ValueError("Blocked: unsafe webhook URL")
@@ -112,8 +131,92 @@ def send_test_webhook(webhook_type, webhook_url):
             "topic": topic,
             "content": "**✅ Vigil Test Notification**\n\nThis is a test from Vigil SSL Checker. If you see this, your Zulip webhook is configured correctly.",
         }, timeout=10, verify=True)
+    elif webhook_type == 'discord':
+        payload = {"embeds": [{
+            "title": "✅ Vigil Test Notification",
+            "description": "This is a test from Vigil SSL Checker. If you see this, your Discord webhook is configured correctly.",
+            "color": 5763719,
+        }]}
+        resp = requests.post(webhook_url, json=payload, timeout=10, verify=True)
+    elif webhook_type == 'telegram':
+        token = webhook_url
+        chat_id = settings.get('telegram_chat_id', '') if settings else ''
+        if not chat_id:
+            raise ValueError("Telegram chat ID not configured")
+        text = "✅ *Vigil Test Notification*\n\nThis is a test from Vigil SSL Checker. If you see this, your Telegram bot is configured correctly."
+        resp = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+            timeout=10, verify=True
+        )
+    elif webhook_type == 'teams':
+        payload = {
+            "@type": "MessageCard",
+            "@context": "http://schema.org/extensions",
+            "summary": "Vigil Test Notification",
+            "title": "✅ Vigil Test Notification",
+            "text": "This is a test from Vigil SSL Checker. If you see this, your Teams webhook is configured correctly.",
+        }
+        resp = requests.post(webhook_url, json=payload, timeout=10, verify=True)
     else:
         raise ValueError(f"Unknown webhook type: {webhook_type}")
+    if resp.status_code not in (200, 204):
+        raise Exception(f"HTTP {resp.status_code}")
+
+
+def _send_discord(webhook_url, domain_name, status, ssl_days_left, domain_days_left, domain_data=None):
+    if not validate_webhook_url(webhook_url):
+        raise ValueError("Blocked: unsafe webhook URL")
+    color = _STATUS_COLORS.get(status, 0x64748b)
+    desc = f"**Status:** {status}\n"
+    if ssl_days_left is not None:
+        desc += f"**SSL Days Left:** {ssl_days_left}\n"
+    if domain_days_left is not None:
+        desc += f"**Domain Days Left:** {domain_days_left}\n"
+    payload = {"embeds": [{
+        "title": f"Vigil Alert: {domain_name}",
+        "description": desc,
+        "color": int(color.lstrip('#'), 16) if isinstance(color, str) else color,
+    }]}
+    resp = requests.post(webhook_url, json=payload, timeout=10, verify=True)
+    if resp.status_code not in (200, 204):
+        raise Exception(f"HTTP {resp.status_code}")
+
+
+def _send_telegram(bot_token, chat_id, domain_name, status, ssl_days_left, domain_days_left, domain_data=None):
+    ssl_line = f"SSL Days Left: {ssl_days_left}\n" if ssl_days_left is not None else ""
+    domain_line = f"Domain Days Left: {domain_days_left}\n" if domain_days_left is not None else ""
+    text = (
+        f"\u26a0\ufe0f *Vigil Alert: {domain_name}*\n"
+        f"Status: {status}\n"
+        f"{ssl_line}{domain_line}"
+    )
+    resp = requests.post(
+        f"https://api.telegram.org/bot{bot_token}/sendMessage",
+        json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+        timeout=10, verify=True
+    )
+    if not resp.json().get('ok'):
+        raise Exception(resp.json().get('description', 'Telegram API error'))
+
+
+def _send_teams(webhook_url, domain_name, status, ssl_days_left, domain_days_left, domain_data=None):
+    if not validate_webhook_url(webhook_url):
+        raise ValueError("Blocked: unsafe webhook URL")
+    text = f"**Status:** {status}\n\n"
+    if ssl_days_left is not None:
+        text += f"**SSL Days Left:** {ssl_days_left}\n"
+    if domain_days_left is not None:
+        text += f"**Domain Days Left:** {domain_days_left}\n"
+    payload = {
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "summary": f"Vigil Alert: {domain_name}",
+        "title": f"\u26a0\ufe0f Vigil Alert: {domain_name}",
+        "text": text,
+        "themeColor": 0xef4444,
+    }
+    resp = requests.post(webhook_url, json=payload, timeout=10, verify=True)
     if resp.status_code not in (200, 204):
         raise Exception(f"HTTP {resp.status_code}")
 

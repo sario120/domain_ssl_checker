@@ -3676,6 +3676,13 @@ function populateSettingsForm(s) {
   document.getElementById('slack_enabled').checked = s.slack_enabled !== 0;
   document.getElementById('zulip_webhook_url').value = s.zulip_webhook_url || '';
   document.getElementById('zulip_enabled').checked = s.zulip_enabled !== 0;
+  document.getElementById('discord_webhook_url').value = s.discord_webhook_url || '';
+  document.getElementById('discord_enabled').checked = s.discord_enabled !== 0;
+  document.getElementById('telegram_bot_token').value = s.telegram_bot_token || '';
+  document.getElementById('telegram_chat_id').value = s.telegram_chat_id || '';
+  document.getElementById('telegram_enabled').checked = s.telegram_enabled !== 0;
+  document.getElementById('teams_webhook_url').value = s.teams_webhook_url || '';
+  document.getElementById('teams_enabled').checked = s.teams_enabled !== 0;
 
   _settingsOriginal = getSettingsFormData();
   _settingsDirty = false;
@@ -3695,6 +3702,13 @@ function getSettingsFormData() {
     slack_enabled: document.getElementById('slack_enabled').checked,
     zulip_webhook_url: document.getElementById('zulip_webhook_url').value,
     zulip_enabled: document.getElementById('zulip_enabled').checked,
+    discord_webhook_url: document.getElementById('discord_webhook_url').value,
+    discord_enabled: document.getElementById('discord_enabled').checked,
+    telegram_bot_token: document.getElementById('telegram_bot_token').value,
+    telegram_chat_id: document.getElementById('telegram_chat_id').value,
+    telegram_enabled: document.getElementById('telegram_enabled').checked,
+    teams_webhook_url: document.getElementById('teams_webhook_url').value,
+    teams_enabled: document.getElementById('teams_enabled').checked,
   };
 }
 
@@ -3774,6 +3788,13 @@ document.getElementById('webhooks-form').addEventListener('submit', async (e) =>
     slack_enabled: document.getElementById('slack_enabled').checked ? 1 : 0,
     zulip_webhook_url: document.getElementById('zulip_webhook_url').value || '',
     zulip_enabled: document.getElementById('zulip_enabled').checked ? 1 : 0,
+    discord_webhook_url: document.getElementById('discord_webhook_url').value || '',
+    discord_enabled: document.getElementById('discord_enabled').checked ? 1 : 0,
+    telegram_bot_token: document.getElementById('telegram_bot_token').value || '',
+    telegram_chat_id: document.getElementById('telegram_chat_id').value || '',
+    telegram_enabled: document.getElementById('telegram_enabled').checked ? 1 : 0,
+    teams_webhook_url: document.getElementById('teams_webhook_url').value || '',
+    teams_enabled: document.getElementById('teams_enabled').checked ? 1 : 0,
   };
   setLoading(btn, true);
   try {

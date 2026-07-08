@@ -790,6 +790,56 @@
               <span id="test-zulip-result" class="inline-result"></span>
             </div>
           </fieldset>
+          <fieldset>
+            <legend>Discord</legend>
+            <div class="form-row">
+              <label for="discord_webhook_url">Discord Webhook URL</label>
+              <input type="url" id="discord_webhook_url" placeholder="https://discord.com/api/webhooks/xxx/yyy">
+              <span class="field-hint">Create at Server Settings → Integrations → Webhooks</span>
+            </div>
+            <div class="form-row checkbox-row">
+              <label><input type="checkbox" id="discord_enabled"> Enable Discord alerts</label>
+            </div>
+            <div class="form-actions" style="margin-top:8px">
+              <button type="button" class="btn btn-secondary" data-action="test-webhook" data-webhook-type="discord">Test Discord</button>
+              <span id="test-discord-result" class="inline-result"></span>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Telegram</legend>
+            <div class="form-row">
+              <label for="telegram_bot_token">Bot Token</label>
+              <input type="text" id="telegram_bot_token" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11">
+              <span class="field-hint">Get from <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> on Telegram</span>
+            </div>
+            <div class="form-row">
+              <label for="telegram_chat_id">Chat ID</label>
+              <input type="text" id="telegram_chat_id" placeholder="-1001234567890">
+              <span class="field-hint">Use <a href="https://t.me/userinfobot" target="_blank" rel="noopener">@userinfobot</a> to find your chat ID</span>
+            </div>
+            <div class="form-row checkbox-row">
+              <label><input type="checkbox" id="telegram_enabled"> Enable Telegram alerts</label>
+            </div>
+            <div class="form-actions" style="margin-top:8px">
+              <button type="button" class="btn btn-secondary" data-action="test-webhook" data-webhook-type="telegram">Test Telegram</button>
+              <span id="test-telegram-result" class="inline-result"></span>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Microsoft Teams</legend>
+            <div class="form-row">
+              <label for="teams_webhook_url">Teams Webhook URL</label>
+              <input type="url" id="teams_webhook_url" placeholder="https://outlook.office.com/webhook/.../IncomingWebhook/...">
+              <span class="field-hint">Create at Teams Channel → Connectors → Incoming Webhook</span>
+            </div>
+            <div class="form-row checkbox-row">
+              <label><input type="checkbox" id="teams_enabled"> Enable Teams alerts</label>
+            </div>
+            <div class="form-actions" style="margin-top:8px">
+              <button type="button" class="btn btn-secondary" data-action="test-webhook" data-webhook-type="teams">Test Teams</button>
+              <span id="test-teams-result" class="inline-result"></span>
+            </div>
+          </fieldset>
           <div class="form-actions">
             <button type="submit" class="btn btn-primary" id="btn-save-webhooks">Save Webhook Settings</button>
           </div>
